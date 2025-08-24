@@ -1,0 +1,9 @@
+<!-- app/src/main/res/values/strings.xml -->
+<resources>
+    <string name="app_name">paycount</string>
+
+    <!-- Firebase Authentication > Sign-in method > Google에 표시되는 Web 클라이언트 ID를 그대로 넣으세요 -->
+    <string name="default_web_client_id">
+        39720603442-9erfopkebeaokc38a5t9pahhpv26sm17.apps.googleusercontent.com
+    </string>
+</resources>

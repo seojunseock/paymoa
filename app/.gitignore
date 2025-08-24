@@ -1,0 +1,56 @@
+# ---- Android / Gradle ----
+*.iml
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ---- Android Studio / IntelliJ ----
+.idea/
+*.ipr
+*.iws
+
+# ---- Logs / OS ----
+*.log
+.DS_Store
+Thumbs.db
+
+# ---- Local config ----
+local.properties
+.gradle/
+**/build/
+
+# ---- Keystore (signing) ----
+*.jks
+*.keystore
+**/keystore/**
+**/signing/**
+
+# ---- Environment / Secrets ----
+.env
+.env.*
+*.keystore.properties
+
+# ---- Firebase / Google ----
+# Google Services - keep local only, don't push to GitHub
+app/google-services.json
+app/src/**/google-services.json
+
+# ---- Misc ----
+*.apk
+*.aab
+*.ap_
+*.hprof
+
+# ---- Kotlin / KSP / KAPT ----
+**/kotlin/*
+**/ksp/*
+**/kapt/*
+
+# ---- Test outputs ----
+**/test-results/
+**/outputs/
+
+# ---- Android profiling ----
+**/profiling/
