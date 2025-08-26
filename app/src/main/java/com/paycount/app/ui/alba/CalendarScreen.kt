@@ -3,8 +3,10 @@
 package com.paycount.app.ui.alba
 
 import android.icu.text.DecimalFormat
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -16,46 +18,45 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.paycount.app.common.BreakSheet
 import com.paycount.app.common.TimeSheet
+import java.time.LocalDate
 import java.util.Calendar
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToLong
 
-/* ---------- 편집 스텝 ---------- */
-private sealed interface EditStep {
-    data object List : EditStep
-    data class Time(val index: Int) : EditStep
-    data class Break(val index: Int) : EditStep
-}
+// PayrollEngine(세전/세후 계산)
+import com.paycount.app.payroll.*   // computeShiftPay, computeMonthlySummary
 
-/* ---------- 에디터 초안 ---------- */
-private data class SegmentDraft(
-    val id: String?,                // 기존이면 id, 새로 추가면 null
-    var startH: Int,
-    var startM: Int,
-    var endH: Int,
-    var endM: Int,
-    var breakMin: Int,
-    var overrideWage: Long?         // null = 기본 시급 사용
-)
+/* 표시용 근무유형 */
+private enum class UiWorkType { 기본, 대타, 연장, 휴일, 야간 }
+
+/* 프리뷰 DTO */
+private data class Preview(val previewHourly: Long, val previewTotal: Long)
 
 /* -------------------------------------------------------------------------- */
-/* 달력 화면                                                                  */
+/* 달력 화면                                                                   */
 /* -------------------------------------------------------------------------- */
 
 @Composable
 fun CalendarScreen(
     onBack: () -> Unit,
+
+    /* 알바/스케줄 (상위에서 상태 관리) */
     albas: List<UICalendarAlba>,
     schedules: List<UICalendarSchedule>,
 
+    /* CRUD 콜백 */
     onDeleteSchedule: (String) -> Unit,
     onUpdateSchedule: (UICalendarSchedule) -> Unit,
+    onAddSchedule: (UICalendarSchedule) -> Unit,
 
-    // ‘해당 근무 시작시각(분)’ 부터 적용
+    /* “그 근무 이후 시급 일괄 적용” */
     onApplyWageForward: (
         albaId: String,
         effectiveY: Int, effectiveM: Int, effectiveD: Int,
@@ -63,37 +64,81 @@ fun CalendarScreen(
         newWage: Long
     ) -> Unit,
 
-    // 새 구간 추가
-    onAddSchedule: (UICalendarSchedule) -> Unit
+    /* 정책 조회/저장 */
+    getSurchargePolicy: (albaId: String) -> SurchargePolicy?,
+    saveSurchargePolicy: (albaId: String, policy: SurchargePolicy?) -> Unit,
+
+    /* 세금/보험 조회(없으면 기본 없음) */
+    getTaxPolicy: (albaId: String) -> TaxConfig? = { null },
+    getInsurancePolicy: (albaId: String) -> InsuranceConfig? = { null },
+
+    /* 필요 시 폼 이동 */
+    goToAlbaForm: (albaId: String) -> Unit
 ) {
+    val ctx = LocalContext.current
+
     var ym by remember { mutableStateOf(YearMonthCompat.now()) }
     var activeIds by remember { mutableStateOf(albas.map { it.id }.toSet()) }
     var sheetDay by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
 
-    // 편집용 상태
+    // 수정 시트 상태
     var editingAlba by remember { mutableStateOf<UICalendarAlba?>(null) }
     var editingDate by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var drafts by remember { mutableStateOf(listOf<SegmentDraft>()) }
     var step by remember { mutableStateOf<EditStep>(EditStep.List) }
-
-    // 인라인 임금 편집용(해당 근무 이후 적용)
-    val wageInlineEditing = remember { mutableStateMapOf<Int, Boolean>() }      // index -> isEditing
-    val wageForwardChecked = remember { mutableStateMapOf<Int, Boolean>() }     // index -> apply forward
+    val wageInlineEditing = remember { mutableStateMapOf<Int, Boolean>() }
+    val wageForwardChecked = remember { mutableStateMapOf<Int, Boolean>() }
 
     // 근무 추가 시트
     var showAddSheet by remember { mutableStateOf(false) }
     var addDate by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
 
-    // 알바 없음 안내 다이얼로그
+    // 알바 없음 안내
     var showNoAlbaDialog by remember { mutableStateOf(false) }
 
-    val df = remember { DecimalFormat("#,###") }
-    val monthTotal by remember(ym, activeIds, schedules, albas) {
-        mutableStateOf(calcMonthTotal(ym, schedules, albas.associateBy { it.id }, activeIds))
-    }
+    // 겹침 경고 팝업
+    var overlapMsg by remember { mutableStateOf<String?>(null) }
 
+    val df = remember { DecimalFormat("#,###") }
     val sundayColor = Color(0xFFE53935)
     val saturdayColor = Color(0xFF1E88E5)
+
+    // 이달 합계(세후)
+    val monthTotal by remember(ym, activeIds, schedules, albas) {
+        mutableStateOf(
+            run {
+                var sum = 0L
+                val albaMap = albas.associateBy { it.id }
+                val firstDay = LocalDate.of(ym.year, ym.month, 1)
+                val lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth())
+                val monthDates = generateSequence(firstDay) { d ->
+                    val n = d.plusDays(1)
+                    if (n <= lastDay) n else null
+                }.toList()
+
+                activeIds.forEach { aid ->
+                    val alba = albaMap[aid] ?: return@forEach
+                    val monthSchedules = schedules.filter { it.albaId == aid && it.year == ym.year && it.month == ym.month }
+                    if (monthSchedules.isEmpty()) return@forEach
+
+                    val tax = getTaxPolicy(aid) ?: TaxConfig.NONE
+                    val ins = getInsurancePolicy(aid) ?: InsuranceConfig.NONE
+                    val pol = getSurchargePolicy(aid) ?: SurchargePolicy()
+
+                    val summary = computeMonthlySummary(
+                        alba = alba,
+                        schedules = monthSchedules,
+                        dates = monthDates,
+                        tax = tax,
+                        insurance = ins,
+                        policy = pol
+                    )
+                    sum += summary.net
+                }
+                sum
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -112,16 +157,21 @@ fun CalendarScreen(
         }
     ) { inner ->
         Column(
-            Modifier.fillMaxSize().padding(inner).padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "이달 예상 합계",
+                        "이달 예상 합계(세후)",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -131,7 +181,9 @@ fun CalendarScreen(
             }
 
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 albas.forEach { a ->
@@ -141,9 +193,7 @@ fun CalendarScreen(
                         color = parseColor(a.colorHex),
                         checked = on,
                         onToggle = {
-                            activeIds = activeIds.toMutableSet().apply {
-                                if (on) remove(a.id) else add(a.id)
-                            }
+                            activeIds = activeIds.toMutableSet().apply { if (on) remove(a.id) else add(a.id) }
                         }
                     )
                     Spacer(Modifier.width(8.dp))
@@ -173,7 +223,6 @@ fun CalendarScreen(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Text("${y}년 ${m}월 ${day}일", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
-                    // 상단 우측 "근무 추가"
                     TextButton(
                         onClick = {
                             sheetDay = null
@@ -196,12 +245,21 @@ fun CalendarScreen(
                         val alba = albaMap[aid] ?: return@forEach
                         val list = listRaw.sortedWith(compareBy({ it.startHour }, { it.startMinute }))
 
-                        val totalPay = list.sumOf { s ->
-                            val wage = s.overrideHourlyWage ?: alba.hourlyWage
-                            (paidMinutes(s) / 60.0 * wage).toLong()
+                        val tax = getTaxPolicy(aid) ?: TaxConfig.NONE
+                        val ins = getInsurancePolicy(aid) ?: InsuranceConfig.NONE
+                        val pol = getSurchargePolicy(aid) ?: SurchargePolicy()
+
+                        val dayNet = list.sumOf { s ->
+                            val breakdown = computeShiftPay(
+                                alba = alba,
+                                schedule = s,
+                                tax = tax,
+                                insurance = ins,
+                                policy = pol
+                            )
+                            breakdown.net
                         }
 
-                        // 흰 배경, 심플 카드
                         Card(
                             Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             shape = RoundedCornerShape(12.dp),
@@ -216,7 +274,7 @@ fun CalendarScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text(alba.name, fontWeight = FontWeight.SemiBold)
                                     Spacer(Modifier.weight(1f))
-                                    Text("${df.format(totalPay)}원", fontWeight = FontWeight.Bold)
+                                    Text("${df.format(dayNet)}원", fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.height(6.dp))
 
@@ -233,7 +291,7 @@ fun CalendarScreen(
 
                                     Button(
                                         onClick = {
-                                            // 편집 시트 열기
+                                            // 수정 시트
                                             editingAlba = alba
                                             editingDate = Triple(y, m, day)
                                             drafts = list.map {
@@ -245,7 +303,6 @@ fun CalendarScreen(
                                                     overrideWage = it.overrideHourlyWage
                                                 )
                                             }
-                                            // 인라인 편집 상태 초기화
                                             wageInlineEditing.clear()
                                             wageForwardChecked.clear()
                                             drafts.indices.forEach { idx ->
@@ -274,32 +331,65 @@ fun CalendarScreen(
     if (showAddSheet && addTriple != null) {
         val (y, m, day) = addTriple
         var selectedAlbaId by remember(addTriple) { mutableStateOf<String?>(null) }
+        var workType by remember(addTriple) { mutableStateOf<UiWorkType?>(null) }
+
         var sH by remember(addTriple) { mutableStateOf(9) }
         var sM by remember(addTriple) { mutableStateOf(0) }
         var eH by remember(addTriple) { mutableStateOf(18) }
         var eM by remember(addTriple) { mutableStateOf(0) }
         var br by remember(addTriple) { mutableStateOf(0) }
 
-        // 시급: 텍스트 → 탭 → 입력
-        var wageEditing by remember(addTriple) { mutableStateOf(false) }
-        var wageText by remember(addTriple) { mutableStateOf("") }
-
         val selectedAlba = albas.firstOrNull { it.id == selectedAlbaId }
+        val policy: SurchargePolicy? = selectedAlba?.id?.let { getSurchargePolicy(it) }
+        val tax = selectedAlba?.id?.let(getTaxPolicy) ?: TaxConfig.NONE
+        val ins = selectedAlba?.id?.let(getInsurancePolicy) ?: InsuranceConfig.NONE
 
-        // 알바 선택 시 기본 시급 세팅(입력 중이 아니면)
-        LaunchedEffect(selectedAlbaId) {
-            if (!wageEditing) {
-                wageText = selectedAlba?.hourlyWage?.toString() ?: ""
-            }
+        // 프리뷰(세후)
+        val preview by remember(selectedAlba, policy, tax, ins, workType, sH, sM, eH, eM, br) {
+            mutableStateOf(
+                run {
+                    val alba = selectedAlba ?: return@run Preview(0, 0)
+                    val mappedType = when (workType) {
+                        UiWorkType.연장 -> WorkType.OVERTIME
+                        UiWorkType.휴일 -> WorkType.HOLIDAY
+                        UiWorkType.야간 -> WorkType.NIGHT
+                        UiWorkType.대타 -> WorkType.SUBSTITUTE
+                        else -> WorkType.BASIC
+                    }
+
+                    val temp = UICalendarSchedule(
+                        albaId = alba.id,
+                        year = y, month = m, day = day,
+                        startHour = sH, startMinute = sM,
+                        endHour = eH, endMinute = eM,
+                        breakMinutes = br,
+                        overrideHourlyWage = null,
+                        workType = mappedType
+                    )
+
+                    val r = computeShiftPay(
+                        alba = alba,
+                        schedule = temp,
+                        tax = tax,
+                        insurance = ins,
+                        policy = policy ?: SurchargePolicy()
+                    )
+                    val paid = (eH * 60 + eM) - (sH * 60 + sM) - br
+                    val effHourly = if (paid > 0) (r.net * 60.0 / paid).roundToLong() else alba.hourlyWage
+                    Preview(previewHourly = effHourly, previewTotal = r.net)
+                }
+            )
         }
 
-        // 픽커 토글
         var showTimePicker by remember { mutableStateOf(false) }
         var showBreakPicker by remember { mutableStateOf(false) }
 
+        // 정책 인라인 편집
+        var inlineEditFor by remember { mutableStateOf<UiWorkType?>(null) }
+
         ModalBottomSheet(onDismissRequest = { showAddSheet = false }) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 상단 바
+
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { showAddSheet = false }) { Text("‹ 뒤로") }
                     Spacer(Modifier.weight(1f))
@@ -307,6 +397,7 @@ fun CalendarScreen(
                     Spacer(Modifier.weight(1f))
                 }
 
+                // 알바 선택
                 Text("어떤 알바인가요?", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                     albas.forEach { a ->
@@ -314,16 +405,47 @@ fun CalendarScreen(
                             text = a.name,
                             color = parseColor(a.colorHex),
                             selected = a.id == selectedAlbaId,
-                            onClick = {
-                                selectedAlbaId = a.id
-                                if (!wageEditing) wageText = a.hourlyWage.toString()
-                            }
+                            onClick = { selectedAlbaId = a.id }
                         )
                         Spacer(Modifier.width(8.dp))
                     }
                 }
 
-                Divider()
+                HorizontalDivider()
+
+                // 근무 유형
+                Text("근무 유형", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    listOf(UiWorkType.기본, UiWorkType.대타, UiWorkType.연장, UiWorkType.휴일, UiWorkType.야간).forEach { t ->
+                        AssistChip(
+                            onClick = {
+                                if (selectedAlbaId == null) {
+                                    Toast.makeText(ctx, "먼저 알바를 선택해 주세요.", Toast.LENGTH_SHORT).show()
+                                    return@AssistChip
+                                }
+                                val pol = getSurchargePolicy(selectedAlbaId!!)
+                                val needPolicy = when (t) {
+                                    UiWorkType.연장 -> pol?.overtimeEnabled != true
+                                    UiWorkType.휴일 -> pol?.holidayEnabled != true
+                                    UiWorkType.야간 -> pol?.nightEnabled != true
+                                    else -> false
+                                }
+                                if (needPolicy) {
+                                    Toast.makeText(ctx, "가산정책이 설정되어 있지 않습니다. 지금 설정할게요.", Toast.LENGTH_SHORT).show()
+                                    inlineEditFor = t
+                                } else {
+                                    workType = t
+                                }
+                            },
+                            label = { Text(t.name) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (workType == t) MaterialTheme.colorScheme.primary.copy(0.12f)
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                }
 
                 // 근무 시간
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -358,53 +480,147 @@ fun CalendarScreen(
                     )
                 }
 
-                // 시급(텍스트 → 탭 → 입력)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("시급", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (wageEditing) {
-                        OutlinedTextField(
-                            value = wageText,
-                            onValueChange = { wageText = it.filter { ch -> ch.isDigit() }.take(9) },
-                            singleLine = true,
-                            placeholder = { Text("알바 선택 후 기본 시급 적용") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        TextButton(
-                            onClick = { wageEditing = true },
-                            modifier = Modifier.align(Alignment.End)
-                        ) { Text(if (wageText.isBlank()) "—" else "${wageText}원") }
+                // 프리뷰
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row {
+                            Text("적용 시급 미리보기: ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (preview.previewHourly > 0) "${df.format(preview.previewHourly)} 원" else "—")
+                        }
+                        Row {
+                            Text("예상 실수령(세후): ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (preview.previewTotal > 0) "${df.format(preview.previewTotal)} 원" else "—")
+                        }
                     }
                 }
-
-                Spacer(Modifier.height(4.dp))
 
                 Button(
                     onClick = {
                         val alba = selectedAlba ?: return@Button
-                        val typed = wageText.toLongOrNull()
-                        val override = if (typed != null && typed != alba.hourlyWage) typed else null
+                        val mappedType = when (workType) {
+                            UiWorkType.연장 -> WorkType.OVERTIME
+                            UiWorkType.휴일 -> WorkType.HOLIDAY
+                            UiWorkType.야간 -> WorkType.NIGHT
+                            UiWorkType.대타 -> WorkType.SUBSTITUTE
+                            else -> WorkType.BASIC
+                        }
+
+                        val newStart = sH * 60 + sM
+                        val newEnd   = eH * 60 + eM
+                        if (newEnd <= newStart) {
+                            overlapMsg = "시작/종료 시간이 올바르지 않습니다."
+                            return@Button
+                        }
+
+                        // 같은 날 모든 스케줄
+                        val sameDay = schedules.filter { it.year == y && it.month == m && it.day == day }
+
+                        // 1) 겹치는 근무 불가(사람 몸은 하나) — 단, "같은 알바의 기본 근무"는 병합 대상으로 허용
+                        val hasStrictConflict = sameDay.any { s ->
+                            val sStart = s.startHour * 60 + s.startMinute
+                            val sEnd   = s.endHour   * 60 + s.endMinute
+                            val overlap = (newStart < sEnd && sStart < newEnd) // 인접(==)은 허용
+                            if (!overlap) false
+                            else {
+                                // 동일 알바 + BASIC 끼리는 병합해서 처리할 예정 → 충돌로 보지 않음
+                                val sameAlbaBasic = (mappedType == WorkType.BASIC
+                                        && s.albaId == alba.id
+                                        && s.workType == WorkType.BASIC)
+                                !sameAlbaBasic
+                            }
+                        }
+                        if (hasStrictConflict) {
+                            overlapMsg = "겹치는 근무가 있습니다."
+                            return@Button
+                        }
+
+                        // 2) 기본 근무면 같은 알바 BASIC 과 겹치거나 맞닿은 구간은 병합해서 하나로 저장
+                        if (mappedType == WorkType.BASIC) {
+                            val mergeTargets = sameDay.filter { s ->
+                                s.albaId == alba.id && s.workType == WorkType.BASIC && overlapsOrTouch(
+                                    newStart, newEnd,
+                                    s.startHour * 60 + s.startMinute,
+                                    s.endHour * 60 + s.endMinute
+                                )
+                            }
+                            if (mergeTargets.isNotEmpty()) {
+                                val mergedStart = min(
+                                    newStart,
+                                    mergeTargets.minOf { it.startHour * 60 + it.startMinute }
+                                )
+                                val mergedEnd = max(
+                                    newEnd,
+                                    mergeTargets.maxOf { it.endHour * 60 + it.endMinute }
+                                )
+                                val mergedBreak = br + mergeTargets.sumOf { it.breakMinutes }
+
+                                // 기존 타깃들은 삭제
+                                mergeTargets.forEach { onDeleteSchedule(it.id) }
+
+                                // 병합본 추가
+                                onAddSchedule(
+                                    UICalendarSchedule(
+                                        albaId = alba.id,
+                                        year = y, month = m, day = day,
+                                        startHour = mergedStart / 60,
+                                        startMinute = mergedStart % 60,
+                                        endHour = mergedEnd / 60,
+                                        endMinute = mergedEnd % 60,
+                                        breakMinutes = mergedBreak,
+                                        overrideHourlyWage = null,
+                                        workType = WorkType.BASIC
+                                    )
+                                )
+                                showAddSheet = false
+                                return@Button
+                            }
+                        }
+
+                        // 3) 그 외는 그대로 추가
                         onAddSchedule(
                             UICalendarSchedule(
-                                id = makeId(),
                                 albaId = alba.id,
                                 year = y, month = m, day = day,
                                 startHour = sH, startMinute = sM,
                                 endHour = eH, endMinute = eM,
                                 breakMinutes = br,
-                                overrideHourlyWage = override
+                                overrideHourlyWage = null,
+                                workType = mappedType
                             )
                         )
                         showAddSheet = false
                     },
-                    enabled = selectedAlbaId != null,
+                    enabled = selectedAlbaId != null && workType != null,
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("저장하기") }
             }
         }
+
+        // 가산정책 인라인 설정
+        inlineEditFor?.let { t ->
+            val albaId = selectedAlbaId ?: return@let
+            SurchargeInlineEditor(
+                title = when (t) {
+                    UiWorkType.연장 -> "연장 가산율 설정"
+                    UiWorkType.휴일 -> "휴일 가산율 설정"
+                    UiWorkType.야간 -> "야간 가산율 설정"
+                    else -> ""
+                },
+                current = getSurchargePolicy(albaId) ?: SurchargePolicy(),
+                targetType = t,
+                onClose = { inlineEditFor = null },
+                onSave = { newPolicy ->
+                    saveSurchargePolicy(albaId, newPolicy)   // 알바에 즉시 저장
+                    workType = t
+                    inlineEditFor = null
+                }
+            )
+        }
     }
 
-    /* ---------------- 근무 수정 시트(스텝 전환) ---------------- */
+    /* ---------------- 근무 수정 시트 ---------------- */
     val curAlba = editingAlba
     val curDate = editingDate
     if (curAlba != null && curDate != null) {
@@ -415,7 +631,6 @@ fun CalendarScreen(
             sheetState = sheetState,
             onDismissRequest = { editingAlba = null; editingDate = null }
         ) {
-            // 상단 바
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -433,7 +648,6 @@ fun CalendarScreen(
 
                 if (step is EditStep.List) {
                     TextButton(onClick = {
-                        // 저장: update / delete / add
                         val originalIds = drafts.mapNotNull { it.id }.toSet()
                         val normalized = drafts.sortedWith(compareBy({ it.startH }, { it.startM }))
 
@@ -457,7 +671,6 @@ fun CalendarScreen(
                         normalized.filter { it.id == null }.forEach { dft ->
                             onAddSchedule(
                                 UICalendarSchedule(
-                                    id = makeId(),
                                     albaId = curAlba.id,
                                     year = y, month = m, day = day,
                                     startHour = dft.startH, startMinute = dft.startM,
@@ -468,18 +681,13 @@ fun CalendarScreen(
                             )
                         }
 
-                        // ‘해당 근무 이후’ 체크된 항목 중 가장 이른 시작시각 1건 적용
                         val forwardCandidate = drafts.withIndex()
                             .filter { iv -> (wageForwardChecked[iv.index] == true) && (iv.value.overrideWage != null) }
                             .minByOrNull { iv -> iv.value.startH * 60 + iv.value.startM }
 
                         if (forwardCandidate != null) {
                             val seg = forwardCandidate.value
-                            onApplyWageForward(
-                                curAlba.id, y, m, day,
-                                seg.startH * 60 + seg.startM,
-                                seg.overrideWage!!
-                            )
+                            onApplyWageForward(curAlba.id, y, m, day, seg.startH * 60 + seg.startM, seg.overrideWage!!)
                         }
 
                         editingAlba = null; editingDate = null
@@ -489,23 +697,9 @@ fun CalendarScreen(
                 }
             }
 
-            // 본문
             when (val s = step) {
                 is EditStep.List -> {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        // + 시간 추가
-                        OutlinedButton(
-                            onClick = {
-                                val base = drafts.lastOrNull()
-                                val new = if (base != null) base.copy(id = null) else SegmentDraft(null, 9, 0, 13, 0, 0, null)
-                                drafts = (drafts + new).sortedWith(compareBy({ it.startH }, { it.startM }))
-                                val newIndex = drafts.indexOf(new)
-                                wageInlineEditing[newIndex] = false
-                                wageForwardChecked[newIndex] = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("+ 시간 추가") }
-
                         drafts.forEachIndexed { index, dft ->
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -513,29 +707,27 @@ fun CalendarScreen(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
                                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text("구간 ${index + 1}", style = MaterialTheme.typography.labelLarge)
-
-                                    // 근무시간
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("근무시간")
-                                        Spacer(Modifier.weight(1f))
+                                        Text(curAlba.name, style = MaterialTheme.typography.labelLarge)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("유형: 기본", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("근무시간"); Spacer(Modifier.weight(1f))
                                         TextButton(onClick = { step = EditStep.Time(index) }) {
                                             Text("${fmtAmPm(dft.startH, dft.startM)} ~ ${fmtAmPm(dft.endH, dft.endM)}")
                                         }
                                     }
-                                    // 휴게시간
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("휴게시간")
-                                        Spacer(Modifier.weight(1f))
+                                        Text("휴게시간"); Spacer(Modifier.weight(1f))
                                         TextButton(onClick = { step = EditStep.Break(index) }) { Text("${dft.breakMin}분") }
                                     }
 
-                                    // 그날 시급(텍스트 → 탭 → 인라인 입력)
                                     val isEditing = wageInlineEditing[index] == true
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text("그날 시급")
-                                            Spacer(Modifier.weight(1f))
+                                            Text("그날 시급"); Spacer(Modifier.weight(1f))
                                             if (isEditing) {
                                                 var wageText by remember(index) {
                                                     mutableStateOf((dft.overrideWage ?: curAlba.hourlyWage).toString())
@@ -559,37 +751,17 @@ fun CalendarScreen(
                                         if (isEditing) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 val checked = wageForwardChecked[index] == true
-                                                Checkbox(
-                                                    checked = checked,
-                                                    onCheckedChange = { wageForwardChecked[index] = it }
-                                                )
+                                                Checkbox(checked = checked, onCheckedChange = { wageForwardChecked[index] = it })
                                                 Spacer(Modifier.width(6.dp))
                                                 Text("해당 근무 이후 모두 적용(같은 날 이후 구간 포함)")
                                             }
                                         }
-                                    }
-
-                                    // 카드 내부 삭제
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                        TextButton(
-                                            onClick = {
-                                                drafts = drafts.toMutableList().also { it.removeAt(index) }
-                                                wageInlineEditing.remove(index)
-                                                wageForwardChecked.remove(index)
-                                                if (drafts.isEmpty()) {
-                                                    drafts = listOf(SegmentDraft(null, 9, 0, 13, 0, 0, null))
-                                                    wageInlineEditing[0] = false
-                                                    wageForwardChecked[0] = false
-                                                }
-                                            }
-                                        ) { Text("삭제") }
                                     }
                                 }
                             }
                         }
                     }
                 }
-
                 is EditStep.Time -> {
                     val idx = s.index
                     val d = drafts[idx]
@@ -605,7 +777,6 @@ fun CalendarScreen(
                         }
                     )
                 }
-
                 is EditStep.Break -> {
                     val idx = s.index
                     val d = drafts[idx]
@@ -629,7 +800,6 @@ fun CalendarScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showNoAlbaDialog = false
-                    // 메인(시작) 화면으로 이동
                     onBack()
                 }) { Text("확인") }
             },
@@ -637,10 +807,20 @@ fun CalendarScreen(
             text = { Text("근무를 추가하려면 먼저 알바를 등록해 주세요.") }
         )
     }
+
+    /* -------- 겹침 경고 -------- */
+    overlapMsg?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { overlapMsg = null },
+            confirmButton = { TextButton(onClick = { overlapMsg = null }) { Text("확인") } },
+            title = { Text("추가할 수 없어요") },
+            text = { Text(msg) }
+        )
+    }
 }
 
 /* -------------------------------------------------------------------------- */
-/* 구성요소 / 달력 그리드                                                      */
+/* 구성 요소 / 달력 그리드                                                     */
 /* -------------------------------------------------------------------------- */
 
 @Composable
@@ -648,7 +828,10 @@ private fun ChoiceChip(text: String, color: Color, selected: Boolean, onClick: (
     val bg = if (selected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
     val fg = if (selected) color else MaterialTheme.colorScheme.onSurface
     Surface(
-        modifier = Modifier.height(36.dp).clip(RoundedCornerShape(18.dp)).clickable { onClick() },
+        modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onClick() },
         color = bg, shape = RoundedCornerShape(18.dp)
     ) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -664,7 +847,10 @@ private fun AlbaChip(name: String, color: Color, checked: Boolean, onToggle: () 
     val bg = if (checked) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
     val fg = if (checked) color else MaterialTheme.colorScheme.onSurface
     Surface(
-        modifier = Modifier.height(36.dp).clip(RoundedCornerShape(18.dp)).clickable { onToggle() },
+        modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onToggle() },
         color = bg, shape = RoundedCornerShape(18.dp)
     ) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -694,8 +880,12 @@ private fun CalendarGrid(
 
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
-            listOf("일","월","화","수","목","금","토").forEachIndexed { i, label ->
-                val color = when (i) { 0 -> sundayColor; 6 -> saturdayColor; else -> MaterialTheme.colorScheme.onSurfaceVariant }
+            listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { i, label ->
+                val color = when (i) {
+                    0 -> sundayColor
+                    6 -> saturdayColor
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
                 Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, color = color)
             }
         }
@@ -710,8 +900,7 @@ private fun CalendarGrid(
                             val day = idx - firstCol + 1
                             if (day in 1..dim) {
                                 val dateSchedules = schedules.filter {
-                                    it.year == ym.year && it.month == ym.month &&
-                                            it.day == day && it.albaId in activeIds
+                                    it.year == ym.year && it.month == ym.month && it.day == day && it.albaId in activeIds
                                 }.sortedWith(compareBy({ it.startHour }, { it.startMinute }))
 
                                 val bars = dateSchedules.take(4).map { s ->
@@ -764,19 +953,23 @@ private fun DayCell(
 ) {
     val shape = RoundedCornerShape(10.dp)
     val baseBg = if (hasWork) Color.White else MaterialTheme.colorScheme.surfaceVariant
+    val bordered = if (isPayday) Modifier.border(BorderStroke(2.dp, paydayColor), shape) else Modifier
 
     Surface(
-        modifier = modifier.padding(4.dp).clip(shape).clickable { onClick() },
-        color = Color.Transparent,
-        border = if (isPayday) BorderStroke(2.dp, paydayColor) else null
+        modifier = modifier.padding(4.dp).then(bordered).clip(shape).clickable { onClick() },
+        color = Color.Transparent
     ) {
         Column(Modifier.fillMaxWidth().background(baseBg, shape).padding(8.dp)) {
             Text(day.toString(), color = dayTextColor, fontWeight = if (hasWork) FontWeight.SemiBold else FontWeight.Normal)
             Spacer(Modifier.height(6.dp))
             bars.forEach { bar ->
                 Box(
-                    Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(6.dp))
-                        .background(bar.color.copy(alpha = 0.18f)).padding(horizontal = 6.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .height(16.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(bar.color.copy(alpha = 0.18f))
+                        .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.CenterStart
                 ) { Text(bar.label, color = bar.color, style = MaterialTheme.typography.labelSmall) }
                 Spacer(Modifier.height(4.dp))
@@ -786,7 +979,7 @@ private fun DayCell(
 }
 
 /* -------------------------------------------------------------------------- */
-/* 유틸                                                                       */
+/* 유틸/상태 타입                                                              */
 /* -------------------------------------------------------------------------- */
 
 private data class YearMonthCompat(val year: Int, val month: Int) {
@@ -806,6 +999,7 @@ private fun daysInMonth(year: Int, month: Int): Int {
     cal.set(Calendar.MONTH, month - 1)
     return cal.getActualMaximum(Calendar.DAY_OF_MONTH)
 }
+
 private fun firstWeekdayColumn(year: Int, month: Int): Int {
     val cal = Calendar.getInstance()
     cal.set(Calendar.YEAR, year)
@@ -813,8 +1007,9 @@ private fun firstWeekdayColumn(year: Int, month: Int): Int {
     cal.set(Calendar.DAY_OF_MONTH, 1)
     return cal.get(Calendar.DAY_OF_WEEK) - 1
 }
-private fun parseColor(hex: String): Color =
-    try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Throwable) { Color(0xFF3B82F6) }
+
+private fun parseColor(hex: String?): Color =
+    try { Color(android.graphics.Color.parseColor(hex ?: "#3B82F6")) } catch (_: Throwable) { Color(0xFF3B82F6) }
 
 private fun fmtAmPm(h24: Int, m: Int): String {
     val pm = h24 >= 12
@@ -822,29 +1017,97 @@ private fun fmtAmPm(h24: Int, m: Int): String {
     return (if (pm) "오후 " else "오전 ") + "%02d:%02d".format(h12, m)
 }
 
-private fun paidMinutes(s: UICalendarSchedule): Int {
-    val start = s.startHour * 60 + s.startMinute
-    val end = s.endHour * 60 + s.endMinute
-    val total = max(0, end - start)
-    return max(0, total - s.breakMinutes)
+/* 편집 시트용 */
+private sealed interface EditStep {
+    data object List : EditStep
+    data class Time(val index: Int) : EditStep
+    data class Break(val index: Int) : EditStep
 }
 
-private fun calcMonthTotal(
-    ym: YearMonthCompat,
-    schedules: List<UICalendarSchedule>,
-    albas: Map<String, UICalendarAlba>,
-    activeIds: Set<String>
-): Long {
-    var sum = 0L
-    schedules.forEach { s ->
-        if (s.year == ym.year && s.month == ym.month && s.albaId in activeIds) {
-            val alba = albas[s.albaId] ?: return@forEach
-            val wage = s.overrideHourlyWage ?: alba.hourlyWage
-            val mins = paidMinutes(s)
-            sum += (mins / 60.0 * wage).toLong()
-        }
-    }
-    return sum
+private data class SegmentDraft(
+    val id: String?,
+    var startH: Int,
+    var startM: Int,
+    var endH: Int,
+    var endM: Int,
+    var breakMin: Int,
+    var overrideWage: Long?
+)
+
+/* 가산정책 인라인 팝업 */
+@Composable
+private fun SurchargeInlineEditor(
+    title: String,
+    current: SurchargePolicy,
+    targetType: UiWorkType,
+    onClose: () -> Unit,
+    onSave: (SurchargePolicy) -> Unit
+) {
+    var temp by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (targetType) {
+                    UiWorkType.연장 -> {
+                        var txt by remember { mutableStateOf(if (temp.overtimeEnabled) temp.overtimePercent.toString() else "50.0") }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("가산율(%)"); Spacer(Modifier.width(12.dp))
+                            OutlinedTextField(
+                                value = txt,
+                                onValueChange = {
+                                    val f = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6)
+                                    txt = f
+                                    temp = temp.copy(overtimeEnabled = true, overtimePercent = f.toDoubleOrNull() ?: 50.0)
+                                },
+                                singleLine = true
+                            )
+                        }
+                    }
+                    UiWorkType.휴일 -> {
+                        var txt by remember { mutableStateOf(if (temp.holidayEnabled) temp.holidayPercent.toString() else "50.0") }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("가산율(%)"); Spacer(Modifier.width(12.dp))
+                            OutlinedTextField(
+                                value = txt,
+                                onValueChange = {
+                                    val f = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6)
+                                    txt = f
+                                    temp = temp.copy(holidayEnabled = true, holidayPercent = f.toDoubleOrNull() ?: 50.0)
+                                },
+                                singleLine = true
+                            )
+                        }
+                    }
+                    UiWorkType.야간 -> {
+                        var txt by remember { mutableStateOf(if (temp.nightEnabled) temp.nightPercent.toString() else "50.0") }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("가산율(%)"); Spacer(Modifier.width(12.dp))
+                            OutlinedTextField(
+                                value = txt,
+                                onValueChange = {
+                                    val f = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6)
+                                    txt = f
+                                    temp = temp.copy(nightEnabled = true, nightPercent = f.toDoubleOrNull() ?: 50.0)
+                                },
+                                singleLine = true
+                            )
+                        }
+                        Text("야간 시간대: 22:00 ~ 06:00 (고정)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(temp) }) { Text("저장") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("닫기") } }
+    )
 }
 
-private fun makeId() = System.nanoTime().toString()
+/* --------------------------- 겹침/맞닿음 유틸 --------------------------- */
+private fun overlapsStrict(aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Boolean =
+    (aStart < bEnd && bStart < aEnd)          // 인접은 허용(X)
+
+private fun overlapsOrTouch(aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Boolean =
+    (aStart <= bEnd && bStart <= aEnd)        // 인접도 병합 대상으로 인정

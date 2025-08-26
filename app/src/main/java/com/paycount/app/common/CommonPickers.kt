@@ -8,8 +8,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,14 +48,17 @@ fun TimeSheet(
     onDismiss: () -> Unit,
     onDone: (Int, Int, Int, Int) -> Unit
 ) {
-    var sH by remember { mutableStateOf(startH) }
-    var sM by remember { mutableStateOf(startM) }
-    var eH by remember { mutableStateOf(endH) }
-    var eM by remember { mutableStateOf(endM) }
+    var sH by remember { mutableIntStateOf(startH) }
+    var sM by remember { mutableIntStateOf(startM) }
+    var eH by remember { mutableIntStateOf(endH) }
+    var eM by remember { mutableIntStateOf(endM) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SheetHeaderMini("근무시간", onBack = onDismiss) { onDone(sH, sM, eH, eM) }
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             Text("시작", style = MaterialTheme.typography.titleMedium)
             TimeWheels(hour24 = sH, minute = sM) { h, m -> sH = h; sM = m }
             HorizontalDivider()
@@ -60,8 +76,8 @@ private fun TimeWheels(
     onChange: (Int, Int) -> Unit
 ) {
     var isPm by remember { mutableStateOf(hour24 >= 12) }
-    var h12 by remember { mutableStateOf(((hour24 + 11) % 12) + 1) } // 1..12
-    var m by remember { mutableStateOf((minute / 5) * 5) }
+    var h12 by remember { mutableIntStateOf(((hour24 + 11) % 12) + 1) } // 1..12
+    var m by remember { mutableIntStateOf((minute / 5) * 5) }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -89,7 +105,8 @@ private fun TimeWheels(
     }
 }
 
-private fun to24(h12: Int, m: Int, pm: Boolean): Int = (h12 % 12) + if (pm) 12 else 0
+private fun to24(h12: Int, @Suppress("UNUSED_PARAMETER") m: Int, pm: Boolean): Int =
+    (h12 % 12) + if (pm) 12 else 0
 
 /* -------------------- 루프 휠 (public) -------------------- */
 @Composable
@@ -126,7 +143,9 @@ fun WheelCyclic(
                 val isSel = dist == 0
                 val alpha = when (dist) { 0 -> 1f; 1 -> 0.55f; else -> 0.25f }
                 Box(
-                    Modifier.fillMaxWidth().height(rowHeight)
+                    Modifier
+                        .fillMaxWidth()
+                        .height(rowHeight)
                         .clickable {
                             val target = idx - selectRow
                             scope.launch { state.animateScrollToItem(target, 0) }
@@ -143,6 +162,7 @@ fun WheelCyclic(
                 }
             }
         }
+        // 스크롤 멈췄을 때 중앙으로 스냅 + 선택 콜백
         LaunchedEffect(state.isScrollInProgress) {
             if (!state.isScrollInProgress) {
                 val base = state.firstVisibleItemIndex
@@ -168,7 +188,10 @@ fun BreakSheet(
         SheetHeaderMini("휴게시간", onBack = onDismiss) {
             onDone(custom.filter { it.isDigit() }.toIntOrNull() ?: 0)
         }
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0, 30, 60).forEach { v ->
                     AssistChip(onClick = { custom = v.toString() }, label = { Text("${v}분") })
@@ -187,7 +210,7 @@ fun BreakSheet(
     }
 }
 
-/* -------------------- 날짜 다중 선택 (LocalDate) -------------------- */
+/* -------------------- 날짜 다중 선택(대화형 다이얼로그) -------------------- */
 @Composable
 fun DateMultiDialog(
     ym: YearMonth,
@@ -199,35 +222,54 @@ fun DateMultiDialog(
     var curYm by remember { mutableStateOf(ym) }
     var sel by remember { mutableStateOf(selected.toSet()) }
 
-    AlertDialog(
+    ModalAlertDialog(
+        curYm = curYm,
+        onPrevMonth = { curYm = curYm.minusMonths(1); onYmChange(curYm) },
+        onNextMonth = { curYm = curYm.plusMonths(1); onYmChange(curYm) },
+        onDismiss = onDismiss,
+        onConfirm = { onDone(sel) }
+    ) {
+        Column {
+            CalendarGridSmall(
+                ym = curYm,
+                selected = sel,
+                onToggle = { date ->
+                    sel = sel.toMutableSet().apply { if (!add(date)) remove(date) }
+                }
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (sel.isEmpty()) "선택 없음" else "${sel.size}일 선택됨",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/* 간단화한 AlertDialog 래퍼(타이틀 바에 월 이동 버튼 배치) */
+@Composable
+private fun ModalAlertDialog(
+    curYm: YearMonth,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { onDone(sel) }) { Text("완료") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("완료") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("‹ 뒤로") } },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { curYm = curYm.minusMonths(1) }) { Text("◀") }
+                TextButton(onClick = onPrevMonth) { Text("◀") }
                 Spacer(Modifier.width(8.dp))
                 Text("${curYm.year}년 ${curYm.monthValue}월", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { curYm = curYm.plusMonths(1) }) { Text("▶") }
+                TextButton(onClick = onNextMonth) { Text("▶") }
             }
         },
-        text = {
-            Column {
-                CalendarGridSmall(
-                    ym = curYm,
-                    selected = sel,
-                    onToggle = { date ->
-                        sel = sel.toMutableSet().apply { if (!add(date)) remove(date) }
-                    }
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = if (sel.isEmpty()) "선택 없음" else "${sel.size}일 선택됨",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        text = { content() }
     )
 }
 
@@ -240,13 +282,20 @@ private fun CalendarGridSmall(
     val first = ym.atDay(1)
     val dim = ym.lengthOfMonth()
     val firstCol = (first.dayOfWeek.value % 7)
+
     Column {
         Row(Modifier.fillMaxWidth()) {
-            listOf("일","월","화","수","목","금","토").forEach {
-                Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf("일", "월", "화", "수", "목", "금", "토").forEach {
+                Text(
+                    it,
+                    Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         Spacer(Modifier.height(6.dp))
+
         val totalCells = firstCol + dim
         val rows = (totalCells + 6) / 7
         repeat(rows) { r ->
@@ -259,13 +308,18 @@ private fun CalendarGridSmall(
                         val isSel = selected.contains(date)
                         val bg = if (isSel) Color(0xFF22C55E).copy(alpha = 0.25f) else Color.Transparent
                         Box(
-                            Modifier.weight(1f).padding(2.dp)
+                            Modifier
+                                .weight(1f)
+                                .padding(2.dp)
                                 .background(bg, shape = MaterialTheme.shapes.small)
                                 .clickable { onToggle(date) }
                                 .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(day.toString(), color = if (isSel) Color(0xFF16A34A) else MaterialTheme.colorScheme.onSurface)
+                            Text(
+                                day.toString(),
+                                color = if (isSel) Color(0xFF16A34A) else MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     } else {
                         Spacer(Modifier.weight(1f))
@@ -276,11 +330,13 @@ private fun CalendarGridSmall(
     }
 }
 
-/* -------------------- 공용 헤더 (public) -------------------- */
+/* -------------------- 공용 헤더 -------------------- */
 @Composable
 fun SheetHeaderMini(title: String, onBack: () -> Unit, onDone: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         TextButton(onClick = onBack) { Text("‹ 뒤로") }
@@ -289,4 +345,17 @@ fun SheetHeaderMini(title: String, onBack: () -> Unit, onDone: () -> Unit) {
         Spacer(Modifier.weight(1f))
         TextButton(onClick = onDone) { Text("완료") }
     }
+}
+
+/* -------------------- 공용 유틸: 색상/시각 포맷 -------------------- */
+fun parseColor(hex: String): Color = try {
+    Color(android.graphics.Color.parseColor(hex))
+} catch (_: Throwable) {
+    Color(0xFF3B82F6)
+}
+
+fun fmtAmPm(h24: Int, m: Int): String {
+    val pm = h24 >= 12
+    val h12 = ((h24 + 11) % 12) + 1
+    return (if (pm) "오후 " else "오전 ") + "%02d:%02d".format(h12, m)
 }
