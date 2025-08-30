@@ -9,7 +9,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,9 +31,9 @@ import java.time.YearMonth
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.derivedStateOf
 
-/* ----------------------------- 모델 ----------------------------- */
+/* ----------------------------- 결과/프리필 모델 ----------------------------- */
 
 data class AlbaFormResult(
     val storeName: String,
@@ -49,16 +51,34 @@ data class AlbaFormResult(
     val payDay: Int
 )
 
+/** 폼 프리필용(수정 진입 시 사용) */
+data class AlbaFormInitial(
+    val storeName: String,
+    val hourlyWage: Long,
+    val tax: TaxConfig = TaxConfig.NONE,
+    val insurance: InsuranceConfig = InsuranceConfig.NONE,
+    val surcharge: SurchargePolicy? = null,
+    val startHour24: Int = 9,
+    val startMinute: Int = 0,
+    val endHour24: Int = 18,
+    val endMinute: Int = 0,
+    val breakMinutes: Int = 0,
+    val selectedDates: Set<LocalDate> = emptySet(),
+    val colorHex: String = "#3B82F6",
+    val payDay: Int = 25
+)
+
 /* ----------------------------- 화면 ----------------------------- */
 
 @Composable
 fun AlbaFormScreen(
     onBack: () -> Unit,
     onSubmit: (AlbaFormResult) -> Unit,
-    /** 기존 등록된 모든 스케줄(다른 알바 포함). 겹침 검사용 */
-    existingSchedules: List<UICalendarSchedule>
+    existingSchedules: List<UICalendarSchedule>,   // 겹침 검사
+    initial: AlbaFormInitial? = null               // 프리필(null이면 신규)
 ) {
     val ctx = LocalContext.current
+    val isEditMode = initial != null
 
     var storeName by remember { mutableStateOf("") }
     var wageDigits by remember { mutableStateOf("") }
@@ -88,7 +108,10 @@ fun AlbaFormScreen(
     var breakMinutes by remember { mutableStateOf(0) }
 
     var showDateDialog by remember { mutableStateOf(false) }
+
+    // ✅ “앱을 여는 날 기준”으로 달력을 엽니다.
     var ym by remember { mutableStateOf(YearMonth.now()) }
+
     var selectedDates by remember { mutableStateOf(setOf<LocalDate>()) }
 
     var showPayDaySheet by remember { mutableStateOf(false) }
@@ -99,47 +122,88 @@ fun AlbaFormScreen(
 
     var error by remember { mutableStateOf<String?>(null) }
 
-    /* ---------- 겹침 날짜 실시간 계산 ---------- */
-    val conflictDates: List<LocalDate> by remember(
+    /* ---------- 프리필 적용 ---------- */
+    LaunchedEffect(initial) {
+        initial?.let { i ->
+            storeName = i.storeName
+            wageDigits = i.hourlyWage.toString()
+            colorHex = i.colorHex
+
+            taxConfig = i.tax;     taxEnabled = i.tax !is TaxConfig.NONE
+            insuranceConfig = i.insurance; insEnabled = i.insurance !is InsuranceConfig.NONE
+            surchargePolicy = i.surcharge ?: SurchargePolicy()
+            surchargeEnabled = i.surcharge != null
+
+            startHour = i.startHour24; startMinute = i.startMinute
+            endHour = i.endHour24; endMinute = i.endMinute
+            breakMinutes = i.breakMinutes
+
+            selectedDates = i.selectedDates
+            payDay = i.payDay
+
+            // ✅ 폼은 항상 "현재 월"에서 시작. (요청사항)
+            ym = YearMonth.now()
+        }
+    }
+
+    /* ---------- 겹침 검사 ---------- */
+    val conflictDates by remember(
         selectedDates, startHour, startMinute, endHour, endMinute, existingSchedules
     ) {
-        mutableStateOf(
-            run {
-                val newStart = startHour * 60 + startMinute
-                val newEnd   = endHour * 60 + endMinute
-                if (newEnd <= newStart) return@run emptyList() // 시간 자체가 이상하면 겹침은 계산하지 않음
+        derivedStateOf<List<LocalDate>> {
+            if (selectedDates.isEmpty()) emptyList()
+            else {
+                val sMin0 = startHour * 60 + startMinute
+                var eMin0 = endHour * 60 + endMinute
+                val isOvernight = eMin0 <= sMin0
+                if (isOvernight) eMin0 += 24 * 60
+
                 selectedDates.filter { d ->
-                    existingSchedules.any { s ->
-                        s.year == d.year && s.month == d.monthValue && s.day == d.dayOfMonth &&
-                                overlapsStrict(
-                                    newStart, newEnd,
-                                    s.startHour * 60 + s.startMinute,
-                                    s.endHour * 60 + s.endMinute
-                                )
+                    fun conflicts(list: List<UICalendarSchedule>, dayOffset: Int): Boolean =
+                        list.any { sc ->
+                            var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60
+                            var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60
+                            if (b <= a) b += 24 * 60
+                            (sMin0 < b) && (a < eMin0)
+                        }
+
+                    val nextD = d.plusDays(1)
+                    val prevD = d.minusDays(1)
+
+                    val same = existingSchedules.filter {
+                        it.year == d.year && it.month == d.monthValue && it.day == d.dayOfMonth
                     }
+                    val next = existingSchedules.filter {
+                        it.year == nextD.year && it.month == nextD.monthValue && it.day == nextD.dayOfMonth
+                    }
+                    val prev = existingSchedules.filter {
+                        it.year == prevD.year && it.month == prevD.monthValue && it.day == prevD.dayOfMonth
+                    }
+
+                    conflicts(same, 0) || conflicts(prev, -1) || conflicts(next, +1)
                 }.sorted()
             }
-        )
+        }
     }
 
     fun validateAndSubmit() {
         val name = storeName.trim()
         val wageLong = wageDigits.toLongOrNull() ?: 0L
-        val newStart = startHour * 60 + startMinute
-        val newEnd   = endHour * 60 + endMinute
+
+        // ✅ 수정 모드에서는 날짜를 건드리지 않아도 저장 가능
+        val needDates = initial == null || selectedDates.isNotEmpty()
 
         when {
             name.isEmpty() -> { error = "매장명을 입력하세요."; return }
             wageLong <= 0L -> { error = "시급을 숫자로 입력하세요."; return }
-            newEnd <= newStart -> { error = "근무 종료시간이 시작시간보다 늦어야 합니다."; return }
+            !needDates -> error = null
             selectedDates.isEmpty() -> { error = "근무 날짜를 1개 이상 선택하세요."; return }
+            payDay !in 1..31 -> { error = "급여일은 1~31일 중에서 선택하세요."; return }
             conflictDates.isNotEmpty() -> {
-                val sample = conflictDates.take(3).joinToString { "${it.monthValue}월 ${it.dayOfMonth}일" }
-                error = "겹치는 근무가 있습니다: $sample"
-                Toast.makeText(ctx, error, Toast.LENGTH_SHORT).show()
+                error = "겹치는 날짜가 있습니다. 아래 경고를 확인해 주세요."
+                Toast.makeText(ctx, "겹치는 근무가 있는 날짜가 있어 저장할 수 없어요.", Toast.LENGTH_SHORT).show()
                 return
             }
-            payDay !in 1..31 -> { error = "급여일은 1~31일 중에서 선택하세요."; return }
             else -> error = null
         }
 
@@ -163,13 +227,14 @@ fun AlbaFormScreen(
                 payDay = payDay
             )
         )
-        Toast.makeText(ctx, "임시 저장 완료", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, if (isEditMode) "수정 사항을 저장했어요" else "임시 저장 완료", Toast.LENGTH_SHORT).show()
     }
 
+    /* ---------------- UI ---------------- */
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("알바 직접 등록") },
+                title = { Text(if (isEditMode) "알바 수정" else "알바 등록") },
                 navigationIcon = { TextButton(onClick = onBack) { Text("‹  뒤로") } },
                 actions = { TextButton(onClick = { validateAndSubmit() }) { Text("완료") } }
             )
@@ -206,10 +271,11 @@ fun AlbaFormScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
 
-                        // ▶ 표시 색상
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showPalette = true }
                         ) {
                             Text("표시 색상", style = MaterialTheme.typography.labelLarge)
                             Spacer(Modifier.weight(1f))
@@ -218,11 +284,9 @@ fun AlbaFormScreen(
                                     .size(32.dp)
                                     .background(parseColor(colorHex), CircleShape)
                                     .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                    .clickable { showPalette = true }
                             )
                         }
 
-                        // 유효성 메시지
                         if (error != null) {
                             Text(error ?: "", color = MaterialTheme.colorScheme.error)
                         }
@@ -250,7 +314,7 @@ fun AlbaFormScreen(
                 }
             }
 
-            /* 근무 기본 템플릿 */
+            /* 근무 설정 */
             item {
                 Text("근무 설정", style = MaterialTheme.typography.titleLarge)
                 ElevatedCard(Modifier.fillMaxWidth()) {
@@ -260,13 +324,12 @@ fun AlbaFormScreen(
                             Spacer(Modifier.weight(1f))
                             Button(onClick = { showTimeSheet = true }) { Text("시간 선택") }
                         }
+                        val overnight = (endHour * 60 + endMinute) <= (startHour * 60 + startMinute)
                         Text(
-                            "선택: ${fmtAmPm(startHour, startMinute)} ~ ${fmtAmPm(endHour, endMinute)}",
+                            "선택: ${fmtAmPm(startHour, startMinute)} ~ ${fmtAmPm(endHour, endMinute)}" +
+                                    if (overnight) " (다음날)" else "",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (endHour * 60 + endMinute <= startHour * 60 + startMinute) {
-                            Text("종료는 시작보다 늦어야 합니다.", color = MaterialTheme.colorScheme.error)
-                        }
 
                         Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -282,13 +345,14 @@ fun AlbaFormScreen(
                             Spacer(Modifier.weight(1f))
                             Button(onClick = { showDateDialog = true }) { Text("달력 열기") }
                         }
-                        val preview = if (selectedDates.isEmpty()) "선택 없음" else "${selectedDates.size}일 근무"
+                        val preview = if (selectedDates.isEmpty()) "선택 없음"
+                        else "${selectedDates.size}일 근무"
                         Text("선택: $preview", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                        // ⚠️ 겹치는 날짜 경고 표시
                         if (conflictDates.isNotEmpty()) {
-                            val sample = conflictDates.take(3).joinToString { "${it.monthValue}월 ${it.dayOfMonth}일" }
-                            Text("⚠ 겹치는 날짜: $sample", color = MaterialTheme.colorScheme.error)
+                            val msg = conflictDates.joinToString { "${it.monthValue}/${it.dayOfMonth}" }
+                            Spacer(Modifier.height(6.dp))
+                            Text("⚠ 겹치는 날짜: $msg", color = MaterialTheme.colorScheme.error)
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -309,29 +373,21 @@ fun AlbaFormScreen(
                 ) {
                     TextButton(onClick = onBack) { Text("뒤로") }
                     Spacer(Modifier.weight(1f))
-                    Button(
-                        onClick = { validateAndSubmit() },
-                        enabled = (endHour * 60 + endMinute) > (startHour * 60 + startMinute)
-                                && conflictDates.isEmpty()
-                    ) { Text("저장") }
+                    Button(onClick = { validateAndSubmit() }) { Text("저장") }
                 }
             }
         }
     }
 
-    /* ------------------- 색상 팔레트(5 x 3) ------------------- */
+    /* -------- 팝업들 -------- */
     if (showPalette) {
         ColorPaletteDialog(
             initialHex = colorHex,
-            onPick = { hex ->
-                colorHex = hex
-                showPalette = false
-            },
+            onPick = { hex -> colorHex = hex; showPalette = false },
             onDismiss = { showPalette = false }
         )
     }
 
-    /* ------------------- 위자드(작은 팝업) ------------------- */
     if (showPolicyWizard) {
         PolicyWizardDialog(
             initialTax = if (taxEnabled) taxConfig else TaxConfig.NONE,
@@ -341,19 +397,15 @@ fun AlbaFormScreen(
             onApply = { t, i, s ->
                 taxConfig = t
                 taxEnabled = t !is TaxConfig.NONE
-
                 insuranceConfig = i
                 insEnabled = i !is InsuranceConfig.NONE
-
                 surchargePolicy = s
-                surchargeEnabled = s.weeklyHolidayEnabled || s.overtimeEnabled || s.holidayEnabled || s.nightEnabled
-
+                surchargeEnabled =
+                    s.weeklyHolidayEnabled || s.overtimeEnabled || s.holidayEnabled || s.nightEnabled
                 showPolicyWizard = false
             }
         )
     }
-
-    /* ------------------- 시트/다이얼로그 ------------------- */
 
     if (showTimeSheet) {
         TimeSheet(
@@ -374,6 +426,7 @@ fun AlbaFormScreen(
         )
     }
     if (showDateDialog) {
+        // ✅ 항상 현재 월로 시작하지만, 사용자가 월을 바꾸면 ym 상태에 저장되어 유지됩니다.
         DateMultiDialog(
             ym = ym,
             selected = selectedDates,
@@ -399,7 +452,6 @@ private fun ColorPaletteDialog(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // 15개 색상(무지개 + 파스텔)
     val colors = listOf(
         "#EF4444", "#F97316", "#F59E0B", "#EAB308", "#84CC16",
         "#22C55E", "#10B981", "#14B8A6", "#06B6D4", "#0EA5E9",
@@ -416,12 +468,8 @@ private fun ColorPaletteDialog(
                 Text("색상 선택", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
 
-                // 5개씩 3줄
                 colors.chunked(5).forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         row.forEach { hex ->
                             val sel = hex.equals(initialHex, ignoreCase = true)
                             Box(
@@ -449,7 +497,7 @@ private fun ColorPaletteDialog(
     }
 }
 
-/* ----------------------------- 위자드 ----------------------------- */
+/* ----------------------------- 위자드(세금/보험/가산) ----------------------------- */
 
 private enum class WizardStep { TAX, INSURANCE, SURCHARGE }
 
@@ -466,10 +514,7 @@ private fun PolicyWizardDialog(
     var ins by remember { mutableStateOf(initialIns) }
     var sur by remember { mutableStateOf(initialSurcharge) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = true)
-    ) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = true)) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -479,10 +524,7 @@ private fun PolicyWizardDialog(
             tonalElevation = 3.dp
         ) {
             Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = {
                         when (step) {
                             WizardStep.TAX -> onDismiss()
@@ -511,10 +553,7 @@ private fun PolicyWizardDialog(
                 when (step) {
                     WizardStep.TAX -> TaxEditor(tax) { tax = it }
                     WizardStep.INSURANCE -> InsuranceEditor(ins) { ins = it }
-                    WizardStep.SURCHARGE -> SurchargeEditor(
-                        current = sur,
-                        onChange = { sur = it }
-                    )
+                    WizardStep.SURCHARGE -> SurchargeEditor(current = sur) { sur = it }
                 }
             }
         }
@@ -563,7 +602,7 @@ private fun InsuranceEditor(current: InsuranceConfig, onChange: (InsuranceConfig
     }
 }
 
-/* ----------------------------- 가산정책(요구사항 반영) ----------------------------- */
+/* ----------------------------- 가산정책 에디터 ----------------------------- */
 
 @Composable
 private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy) -> Unit) {
@@ -572,11 +611,7 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
     fun choiceFrom(enabled: Boolean, pct: Double): String {
         if (!enabled) return "없음"
         val r = pct.roundToInt()
-        return when (r) {
-            50 -> "50%"
-            100 -> "100%"
-            else -> "직접 입력"
-        }
+        return when (r) { 50 -> "50%"; 100 -> "100%"; else -> "직접 입력" }
     }
 
     var overChoice by remember { mutableStateOf(choiceFrom(temp.overtimeEnabled, temp.overtimePercent)) }
@@ -591,7 +626,6 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("가산정책", style = MaterialTheme.typography.titleMedium)
 
-            // 주휴수당 스위치
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("주휴수당")
                 Spacer(Modifier.weight(1f))
@@ -603,9 +637,8 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
                     }
                 )
             }
-            Divider()
+            HorizontalDivider()
 
-            // 연장 근무
             PctDropdownRow(
                 title = "연장 근무",
                 choice = overChoice,
@@ -630,7 +663,6 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
                 }
             )
 
-            // 휴일 근무
             PctDropdownRow(
                 title = "휴일 근무",
                 choice = holChoice,
@@ -655,7 +687,6 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
                 }
             )
 
-            // 야간 근무
             PctDropdownRow(
                 title = "야간 근무\n(22:00~06:00)",
                 choice = nightChoice,
@@ -683,9 +714,8 @@ private fun SurchargeEditor(current: SurchargePolicy, onChange: (SurchargePolicy
     }
 }
 
-/**
- * 드롭다운 + (필요 시) 같은 칸에서 "직접 입력"을 숫자 입력으로 전환.
- */
+/* ----------------------------- 공용 컴포넌트/요약 ----------------------------- */
+
 @Composable
 private fun PctDropdownRow(
     title: String,
@@ -724,10 +754,7 @@ private fun PctDropdownRow(
                     items.forEach { opt ->
                         DropdownMenuItem(
                             text = { Text(opt) },
-                            onClick = {
-                                onChoice(opt)
-                                expanded = false
-                            }
+                            onClick = { onChoice(opt); expanded = false }
                         )
                     }
                 }
@@ -735,8 +762,6 @@ private fun PctDropdownRow(
         }
     }
 }
-
-/* ----------------------------- 공용 ----------------------------- */
 
 @Composable
 private fun SelectableRow(text: String, selected: Boolean, onClick: () -> Unit) {
@@ -750,8 +775,6 @@ private fun SelectableRow(text: String, selected: Boolean, onClick: () -> Unit) 
         Text(text, color = color)
     }
 }
-
-/* ----------------------------- 요약 텍스트 ----------------------------- */
 
 private fun summaryTax(enabled: Boolean, cfg: TaxConfig): String {
     if (!enabled || cfg is TaxConfig.NONE) return "세금: 없음"
@@ -870,7 +893,3 @@ private fun parseColor(hex: String): Color = try {
 } catch (_: Throwable) {
     Color(0xFF3B82F6) // fallback
 }
-
-/* ---- 겹침 판정: 맞닿는 건 허용(= OK), 진짜로 겹치면 true ---- */
-private fun overlapsStrict(aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Boolean =
-    (aStart < bEnd && bStart < aEnd)

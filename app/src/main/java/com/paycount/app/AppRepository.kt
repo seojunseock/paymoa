@@ -1,13 +1,15 @@
 package com.paycount.app
 
+import com.paycount.app.ui.alba.AlbaFormInitial
 import com.paycount.app.ui.alba.AlbaFormResult
 import com.paycount.app.ui.alba.InsuranceConfig
-import com.paycount.app.ui.alba.TaxConfig
 import com.paycount.app.ui.alba.SurchargePolicy
+import com.paycount.app.ui.alba.TaxConfig
 import com.paycount.app.ui.alba.UICalendarAlba
 import com.paycount.app.ui.alba.UICalendarSchedule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.LocalDate
 import java.util.UUID
 
 /* ---------------- 폼에서 저장한 기본 근무 템플릿 ---------------- */
@@ -49,8 +51,17 @@ interface AppRepository {
 
     fun getProfile(albaId: String): AlbaProfileSnapshot
 
-    fun saveAlbaForm(result: AlbaFormResult)                // 신규 저장
-    fun updateAlba(albaId: String, patch: AlbaPatch)        // 수정 저장
+    /** 폼 프리필용: 수정 진입 시 전체 기본값을 반환 */
+    fun getFormInitial(albaId: String): AlbaFormInitial
+
+    /** 신규 저장 */
+    fun saveAlbaForm(result: AlbaFormResult)
+
+    /** 기존 알바 수정(부분 패치) */
+    fun updateAlba(albaId: String, patch: AlbaPatch)
+
+    /** 기존 알바 수정(폼 전체 결과로 저장 + 스케줄 날짜 업서트) */
+    fun updateAlbaFromForm(albaId: String, result: AlbaFormResult)
 
     fun addSchedule(s: UICalendarSchedule)
     fun updateSchedule(s: UICalendarSchedule)
@@ -84,10 +95,50 @@ class InMemoryAppRepository : AppRepository {
             ?: error("Profile not found for albaId=$albaId")
     }
 
+    override fun getFormInitial(albaId: String): AlbaFormInitial {
+        val prof = getProfile(albaId)
+        val alba = prof.alba
+
+        // 시간 템플릿 없으면 해당 알바 스케줄 하나를 참고, 그것도 없으면 기본값
+        val tpl = prof.defaultShift ?: run {
+            val any = _schedules.value.firstOrNull { it.albaId == albaId }
+            if (any != null) {
+                DefaultShiftTemplate(
+                    startH = any.startHour, startM = any.startMinute,
+                    endH = any.endHour, endM = any.endMinute,
+                    breakMin = any.breakMinutes
+                )
+            } else {
+                DefaultShiftTemplate(9, 0, 18, 0, 0)
+            }
+        }
+
+        val selectedDates: Set<LocalDate> = _schedules.value
+            .filter { it.albaId == albaId }
+            .map { LocalDate.of(it.year, it.month, it.day) }
+            .toSet()
+
+        return AlbaFormInitial(
+            storeName = alba.name,
+            hourlyWage = alba.hourlyWage,
+            tax = prof.tax,
+            insurance = prof.insurance,
+            surcharge = prof.surcharge,
+            startHour24 = tpl.startH,
+            startMinute = tpl.startM,
+            endHour24 = tpl.endH,
+            endMinute = tpl.endM,
+            breakMinutes = tpl.breakMin,
+            selectedDates = selectedDates,
+            colorHex = alba.colorHex,
+            payDay = alba.payDay
+        )
+    }
+
     override fun saveAlbaForm(result: AlbaFormResult) {
         val id = UUID.randomUUID().toString()
 
-        // 매장명 중복 방지: 같은 이름 있으면 "편의점", "편의점 (2)", "편의점 (3)" … 로 변경
+        // 매장명 중복 방지: 같은 이름 있으면 "편의점", "편의점 (2)", "편의점 (3)" …
         val uniqueName = generateUniqueName(result.storeName)
 
         val alba = UICalendarAlba(
@@ -150,6 +201,64 @@ class InMemoryAppRepository : AppRepository {
             defaultShift = patch.defaultShift ?: cur.defaultShift
         )
         _albas.value = profiles.values.map { it.alba }
+    }
+
+    override fun updateAlbaFromForm(albaId: String, result: AlbaFormResult) {
+        // 1) 프로필 업데이트
+        val current = profiles[albaId] ?: return
+        val uniqueName =
+            if (result.storeName == current.alba.name) result.storeName
+            else generateUniqueName(result.storeName, excludeId = albaId)
+
+        val updatedAlba = current.alba.copy(
+            name = uniqueName,
+            colorHex = result.colorHex,
+            hourlyWage = result.hourlyWage,
+            payDay = result.payDay
+        )
+        profiles[albaId] = current.copy(
+            alba = updatedAlba,
+            tax = result.tax,
+            insurance = result.insurance,
+            surcharge = result.surcharge ?: SurchargePolicy(),
+            defaultShift = DefaultShiftTemplate(
+                startH = result.startHour24,
+                startM = result.startMinute,
+                endH = result.endHour24,
+                endM = result.endMinute,
+                breakMin = result.breakMinutes
+            )
+        )
+        _albas.value = profiles.values.map { it.alba }
+
+        // 2) 스케줄 업서트(같은 날짜 있으면 수정, 없으면 추가)
+        if (result.selectedDates.isNotEmpty()) {
+            val base = _schedules.value.toMutableList()
+            for (d in result.selectedDates) {
+                val idx = base.indexOfFirst {
+                    it.albaId == albaId && it.year == d.year && it.month == d.monthValue && it.day == d.dayOfMonth
+                }
+                if (idx >= 0) {
+                    val old = base[idx]
+                    base[idx] = old.copy(
+                        startHour = result.startHour24,
+                        startMinute = result.startMinute,
+                        endHour = result.endHour24,
+                        endMinute = result.endMinute,
+                        breakMinutes = result.breakMinutes
+                    )
+                } else {
+                    base += UICalendarSchedule(
+                        albaId = albaId,
+                        year = d.year, month = d.monthValue, day = d.dayOfMonth,
+                        startHour = result.startHour24, startMinute = result.startMinute,
+                        endHour = result.endHour24, endMinute = result.endMinute,
+                        breakMinutes = result.breakMinutes
+                    )
+                }
+            }
+            _schedules.value = base
+        }
     }
 
     override fun addSchedule(s: UICalendarSchedule) {

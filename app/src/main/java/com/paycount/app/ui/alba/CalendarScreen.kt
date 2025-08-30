@@ -279,7 +279,8 @@ fun CalendarScreen(
                                 Spacer(Modifier.height(6.dp))
 
                                 list.forEach { s ->
-                                    Text("• ${fmtAmPm(s.startHour, s.startMinute)} ~ ${fmtAmPm(s.endHour, s.endMinute)}  (휴게 ${s.breakMinutes}분)")
+                                    val overnightSeg = (s.endHour * 60 + s.endMinute) <= (s.startHour * 60 + s.startMinute)
+                                    Text("• ${fmtAmPm(s.startHour, s.startMinute)} ~ ${fmtAmPm(s.endHour, s.endMinute)}${if (overnightSeg) " (다음날)" else ""}  (휴게 ${s.breakMinutes}분)")
                                 }
 
                                 Spacer(Modifier.height(10.dp))
@@ -374,7 +375,7 @@ fun CalendarScreen(
                         insurance = ins,
                         policy = policy ?: SurchargePolicy()
                     )
-                    val paid = (eH * 60 + eM) - (sH * 60 + sM) - br
+                    val paid = ((eH * 60 + eM) - (sH * 60 + sM)).let { if (it <= 0) it + 24 * 60 else it } - br
                     val effHourly = if (paid > 0) (r.net * 60.0 / paid).roundToLong() else alba.hourlyWage
                     Preview(previewHourly = effHourly, previewTotal = r.net)
                 }
@@ -452,7 +453,7 @@ fun CalendarScreen(
                     Text("근무 시간")
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { showTimePicker = true }) {
-                        Text("${fmtAmPm(sH, sM)} ~ ${fmtAmPm(eH, eM)}")
+                        Text("${fmtAmPm(sH, sM)} ~ ${fmtAmPm(eH, eM)}" + if ((eH*60+eM) <= (sH*60+sM)) " (다음날)" else "")
                     }
                 }
                 if (showTimePicker) {
@@ -507,28 +508,47 @@ fun CalendarScreen(
                             else -> WorkType.BASIC
                         }
 
-                        val newStart = sH * 60 + sM
-                        val newEnd   = eH * 60 + eM
-                        if (newEnd <= newStart) {
-                            overlapMsg = "시작/종료 시간이 올바르지 않습니다."
-                            return@Button
+                        fun toMin(h: Int, m: Int) = h * 60 + m
+                        var newStart = toMin(sH, sM)
+                        var newEnd   = toMin(eH, eM)
+                        if (newEnd <= newStart) newEnd += 24 * 60
+
+                        val base = LocalDate.of(y, m, day)
+
+                        fun normSpan(sc: UICalendarSchedule): Pair<Int, Int> {
+                            val d = LocalDate.of(sc.year, sc.month, sc.day)
+                            var s = sc.startHour * 60 + sc.startMinute
+                            var e = sc.endHour * 60 + sc.endMinute
+                            if (e <= s) e += 24 * 60
+                            val off = when {
+                                d.isEqual(base.minusDays(1)) -> -1
+                                d.isEqual(base) -> 0
+                                d.isEqual(base.plusDays(1)) -> 1
+                                else -> Int.MAX_VALUE
+                            }
+                            if (off == Int.MAX_VALUE) return Int.MAX_VALUE to Int.MIN_VALUE
+                            s += off * 24 * 60
+                            e += off * 24 * 60
+                            return s to e
                         }
 
-                        // 같은 날 모든 스케줄
-                        val sameDay = schedules.filter { it.year == y && it.month == m && it.day == day }
+                        fun overlap(aS: Int, aE: Int, bS: Int, bE: Int) = (aS < bE && bS < aE)
+                        fun overlapOrTouch(aS: Int, aE: Int, bS: Int, bE: Int) = (aS <= bE && bS <= aE)
 
-                        // 1) 겹치는 근무 불가(사람 몸은 하나) — 단, "같은 알바의 기본 근무"는 병합 대상으로 허용
-                        val hasStrictConflict = sameDay.any { s ->
-                            val sStart = s.startHour * 60 + s.startMinute
-                            val sEnd   = s.endHour   * 60 + s.endMinute
-                            val overlap = (newStart < sEnd && sStart < newEnd) // 인접(==)은 허용
-                            if (!overlap) false
+                        val spansAll = schedules
+                            .map { it to normSpan(it) }
+                            .filter { it.second.first != Int.MAX_VALUE }
+
+                        val hasStrictConflict = spansAll.any { (sc, span) ->
+                            val (s, e) = span
+                            val hit = overlap(newStart, newEnd, s, e)
+                            if (!hit) false
                             else {
-                                // 동일 알바 + BASIC 끼리는 병합해서 처리할 예정 → 충돌로 보지 않음
-                                val sameAlbaBasic = (mappedType == WorkType.BASIC
-                                        && s.albaId == alba.id
-                                        && s.workType == WorkType.BASIC)
-                                !sameAlbaBasic
+                                val isSameDayBasic =
+                                    (sc.albaId == alba.id && sc.workType == WorkType.BASIC &&
+                                            LocalDate.of(sc.year, sc.month, sc.day).isEqual(base))
+                                val weAreBasic = (mappedType == WorkType.BASIC)
+                                !(weAreBasic && isSameDayBasic)
                             }
                         }
                         if (hasStrictConflict) {
@@ -536,38 +556,34 @@ fun CalendarScreen(
                             return@Button
                         }
 
-                        // 2) 기본 근무면 같은 알바 BASIC 과 겹치거나 맞닿은 구간은 병합해서 하나로 저장
+                        // BASIC 병합(당일 기준) — 오버나이트 포함
                         if (mappedType == WorkType.BASIC) {
-                            val mergeTargets = sameDay.filter { s ->
-                                s.albaId == alba.id && s.workType == WorkType.BASIC && overlapsOrTouch(
-                                    newStart, newEnd,
-                                    s.startHour * 60 + s.startMinute,
-                                    s.endHour * 60 + s.endMinute
-                                )
+                            val sameDay = schedules.filter { it.year == y && it.month == m && it.day == day }
+                            val mergeTargets = sameDay.filter { sc ->
+                                sc.albaId == alba.id && sc.workType == WorkType.BASIC
+                            }.filter { sc ->
+                                val (s, e) = normSpan(sc)
+                                overlapOrTouch(newStart, newEnd, s, e)
                             }
+
                             if (mergeTargets.isNotEmpty()) {
-                                val mergedStart = min(
-                                    newStart,
-                                    mergeTargets.minOf { it.startHour * 60 + it.startMinute }
-                                )
-                                val mergedEnd = max(
-                                    newEnd,
-                                    mergeTargets.maxOf { it.endHour * 60 + it.endMinute }
-                                )
+                                val mergedStart = min(newStart, mergeTargets.minOf { normSpan(it).first })
+                                val mergedEnd   = max(newEnd,   mergeTargets.maxOf { normSpan(it).second })
                                 val mergedBreak = br + mergeTargets.sumOf { it.breakMinutes }
 
-                                // 기존 타깃들은 삭제
                                 mergeTargets.forEach { onDeleteSchedule(it.id) }
 
-                                // 병합본 추가
+                                fun hOf(min: Int) = (min % (24 * 60) + (24 * 60)) % (24 * 60) / 60
+                                fun mOf(min: Int) = (min % (24 * 60) + (24 * 60)) % (24 * 60) % 60
+
                                 onAddSchedule(
                                     UICalendarSchedule(
                                         albaId = alba.id,
                                         year = y, month = m, day = day,
-                                        startHour = mergedStart / 60,
-                                        startMinute = mergedStart % 60,
-                                        endHour = mergedEnd / 60,
-                                        endMinute = mergedEnd % 60,
+                                        startHour = hOf(mergedStart),
+                                        startMinute = mOf(mergedStart),
+                                        endHour = hOf(mergedEnd),
+                                        endMinute = mOf(mergedEnd),
                                         breakMinutes = mergedBreak,
                                         overrideHourlyWage = null,
                                         workType = WorkType.BASIC
@@ -578,13 +594,18 @@ fun CalendarScreen(
                             }
                         }
 
-                        // 3) 그 외는 그대로 추가
+                        // 일반 추가
+                        fun hOf(min: Int) = (min % (24 * 60) + (24 * 60)) % (24 * 60) / 60
+                        fun mOf(min: Int) = (min % (24 * 60) + (24 * 60)) % (24 * 60) % 60
+
                         onAddSchedule(
                             UICalendarSchedule(
                                 albaId = alba.id,
                                 year = y, month = m, day = day,
-                                startHour = sH, startMinute = sM,
-                                endHour = eH, endMinute = eM,
+                                startHour = hOf(newStart),
+                                startMinute = mOf(newStart),
+                                endHour = hOf(newEnd),
+                                endMinute = mOf(newEnd),
                                 breakMinutes = br,
                                 overrideHourlyWage = null,
                                 workType = mappedType
@@ -612,7 +633,7 @@ fun CalendarScreen(
                 targetType = t,
                 onClose = { inlineEditFor = null },
                 onSave = { newPolicy ->
-                    saveSurchargePolicy(albaId, newPolicy)   // 알바에 즉시 저장
+                    saveSurchargePolicy(albaId, newPolicy)
                     workType = t
                     inlineEditFor = null
                 }
@@ -716,7 +737,8 @@ fun CalendarScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text("근무시간"); Spacer(Modifier.weight(1f))
                                         TextButton(onClick = { step = EditStep.Time(index) }) {
-                                            Text("${fmtAmPm(dft.startH, dft.startM)} ~ ${fmtAmPm(dft.endH, dft.endM)}")
+                                            Text("${fmtAmPm(dft.startH, dft.startM)} ~ ${fmtAmPm(dft.endH, dft.endM)}" +
+                                                    if ((dft.endH*60+dft.endM) <= (dft.startH*60+dft.startM)) " (다음날)" else "")
                                         }
                                     }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -771,8 +793,7 @@ fun CalendarScreen(
                         onDone = { sh, sm, eh, em ->
                             drafts = drafts.toMutableList().apply {
                                 this[idx] = this[idx].copy(startH = sh, startM = sm, endH = eh, endM = em)
-                                sortWith(compareBy({ it.startH }, { it.startM }))
-                            }
+                                sortWith(compareBy({ it.startH }, { it.startM }))}
                             step = EditStep.List
                         }
                     )
@@ -855,7 +876,7 @@ private fun AlbaChip(name: String, color: Color, checked: Boolean, onToggle: () 
     ) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(color))
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp))   // ✅ 수정: Modifier.width(...)
             Text(name, color = fg, style = MaterialTheme.typography.labelLarge)
         }
     }
@@ -1107,7 +1128,7 @@ private fun SurchargeInlineEditor(
 
 /* --------------------------- 겹침/맞닿음 유틸 --------------------------- */
 private fun overlapsStrict(aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Boolean =
-    (aStart < bEnd && bStart < aEnd)          // 인접은 허용(X)
+    (aStart < bEnd && bStart < aEnd)
 
 private fun overlapsOrTouch(aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Boolean =
-    (aStart <= bEnd && bStart <= aEnd)        // 인접도 병합 대상으로 인정
+    (aStart <= bEnd && bStart <= aEnd)

@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.paycount.app.common.BreakSheet
 import com.paycount.app.common.DateMultiDialog
 import com.paycount.app.common.TimeSheet
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.launch                 // ✅ 추가
 import java.time.LocalDate
 import java.time.YearMonth
 import java.util.Calendar
@@ -32,6 +32,7 @@ import kotlin.math.max
 fun AlbaStartScreen(
     onBack: () -> Unit,
     onGoToAlbaForm: () -> Unit,
+    onEditAlba: (String) -> Unit,               // 수정 버튼
     albas: List<UICalendarAlba>,
     schedules: List<UICalendarSchedule>,
     onAddWork: (
@@ -42,9 +43,8 @@ fun AlbaStartScreen(
     ) -> Unit,
 ) {
     val ctx = LocalContext.current
-
-    // 바텀시트로 근무 추가할 타깃 알바
     var sheetTarget by remember { mutableStateOf<UICalendarAlba?>(null) }
+    val expanded = remember { mutableStateMapOf<String, Boolean>() }
 
     Scaffold(
         topBar = {
@@ -61,40 +61,7 @@ fun AlbaStartScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            /* 매장코드 등록 (간소화) */
-            item {
-                var code by remember { mutableStateOf("") }
-                ElevatedCard {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("매장 코드로 등록", style = MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            placeholder = { Text("매장 코드 입력") }
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { code = "" }) { Text("지우기") }
-                            Spacer(Modifier.weight(1f))
-                            Button(onClick = {
-                                Toast.makeText(
-                                    ctx,
-                                    "사장님 코드 등록은 서버 연동 후 처리됩니다.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }) { Text("등록") }
-                        }
-                    }
-                }
-            }
-
-            /* 직접 등록 버튼만 */
+            /* 직접 등록 버튼 */
             item {
                 ElevatedCard {
                     Row(
@@ -115,6 +82,8 @@ fun AlbaStartScreen(
 
             items(albas) { alba ->
                 val todayPay = calcPayUntilToday(alba, schedules)
+                val isExpanded = expanded[alba.id] == true
+
                 ElevatedCard(Modifier.fillMaxWidth()) {
                     Column(
                         Modifier
@@ -122,6 +91,7 @@ fun AlbaStartScreen(
                             .padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // 헤더
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 Modifier
@@ -130,13 +100,44 @@ fun AlbaStartScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(alba.name, style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.width(8.dp))
+                            Text("시급: %,d원".format(alba.hourlyWage), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.weight(1f))
                         }
+
                         Text("오늘까지 급여: %,d원".format(todayPay))
-                        Button(
-                            onClick = { sheetTarget = alba },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("근무 추가") }
+
+                        // 액션 버튼
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { onEditAlba(alba.id) }) { Text("수정") }
+                            Button(onClick = { sheetTarget = alba }) { Text("근무 추가") }
+                            TextButton(onClick = { expanded[alba.id] = !isExpanded }) {
+                                Text(if (isExpanded) "닫기" else "펼치기")
+                            }
+                        }
+
+                        // 펼침 영역
+                        if (isExpanded) {
+                            val last = schedules
+                                .filter { it.albaId == alba.id }
+                                .maxByOrNull { it.year * 10000 + it.month * 100 + it.day }
+
+                            Divider()
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("급여일: 매월 ${alba.payDay}일", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (last != null) {
+                                    Text(
+                                        "최근 근무: %02d:%02d ~ %02d:%02d (휴게 %d분)".format(
+                                            last.startHour, last.startMinute, last.endHour, last.endMinute, last.breakMinutes
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text("최근 근무 없음", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text("세금/보험/가산정책은 카드의 ‘수정’에서 확인·변경하세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
             }
@@ -166,7 +167,7 @@ private fun AddWorkSheet(
     onConfirm: (Set<Triple<Int, Int, Int>>, Int, Int, Int, Int, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val ctx = LocalContext.current
+    val ctx = LocalContext.current                       // ✅ 컨텍스트는 여기서 미리 받기
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -179,7 +180,7 @@ private fun AddWorkSheet(
     var showTime by remember { mutableStateOf(false) }
     var showBreak by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
-    var dates by remember { mutableStateOf(setOf<LocalDate>()) } // ← LocalDate로 관리
+    var dates by remember { mutableStateOf(setOf<LocalDate>()) } // LocalDate로 관리
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -195,7 +196,7 @@ private fun AddWorkSheet(
             Spacer(Modifier.weight(1f))
             IconButton(
                 onClick = {
-                    scope.launch { sheetState.hide() }
+                    scope.launch { sheetState.hide() }              // ✅ launch 사용
                         .invokeOnCompletion { onDismiss() }
                 }
             ) {
@@ -238,7 +239,7 @@ private fun AddWorkSheet(
             Button(
                 onClick = {
                     if (dates.isEmpty()) {
-                        Toast.makeText(ctx, "근무 날짜를 선택하세요.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(ctx, "근무 날짜를 선택하세요.", Toast.LENGTH_SHORT).show() // ✅ LocalContext.current 사용 금지, 위 ctx 사용
                         return@Button
                     }
                     val triples: Set<Triple<Int, Int, Int>> =
@@ -246,7 +247,7 @@ private fun AddWorkSheet(
 
                     onConfirm(triples, startH, startM, endH, endM, breakMin)
 
-                    scope.launch { sheetState.hide() }
+                    scope.launch { sheetState.hide() }              // ✅ launch 사용
                         .invokeOnCompletion { onDismiss() }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -288,6 +289,7 @@ private fun AddWorkSheet(
 /* -------------------------------------------------------------------------- */
 /*  유틸                                                                       */
 /* -------------------------------------------------------------------------- */
+
 private fun parseColor(hex: String): Color = try {
     Color(android.graphics.Color.parseColor(hex))
 } catch (_: Throwable) {

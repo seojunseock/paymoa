@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.paycount.app.ui.shell
 
 import androidx.compose.foundation.layout.Box
@@ -9,25 +7,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.paycount.app.AlbaPatch
 import com.paycount.app.LocalAppRepo
-import com.paycount.app.ui.alba.*
-import kotlinx.coroutines.flow.collectLatest
-
-/* -------- 파라미터 없는 래퍼: MainActivity에서 이것만 호출 -------- */
-@Composable
-fun AppWithBottomTabs() {
-    var selected by remember { mutableStateOf(0) }
-    AppWithBottomTabs(
-        selectedTab = selected,
-        onSelectTab = { selected = it },
-        startScreen = { StartTab(onRequestGoCalendar = { selected = 1 }) },
-        calendarScreen = { CalendarTab() },
-        profileScreen = { ProfileTab() }
-    )
-}
+import com.paycount.app.ui.alba.AlbaFormInitial
+import com.paycount.app.ui.alba.AlbaFormScreen
+import com.paycount.app.ui.alba.AlbaStartScreen
+import com.paycount.app.ui.alba.CalendarScreen
+import com.paycount.app.ui.alba.UICalendarSchedule
 
 @Composable
 fun AppWithBottomTabs(
@@ -35,7 +35,7 @@ fun AppWithBottomTabs(
     onSelectTab: (Int) -> Unit,
     startScreen: @Composable () -> Unit,
     calendarScreen: @Composable () -> Unit,
-    profileScreen: @Composable () -> Unit
+    profileScreen: @Composable () -> Unit,
 ) {
     Scaffold(
         bottomBar = {
@@ -43,25 +43,29 @@ fun AppWithBottomTabs(
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { onSelectTab(0) },
-                    icon = { Icon(Icons.Filled.Home, contentDescription = "메인") },
+                    icon = { Icon(imageVector = Icons.Filled.Home, contentDescription = "메인") },
                     label = { Text("메인") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { onSelectTab(1) },
-                    icon = { Icon(Icons.Filled.CalendarMonth, contentDescription = "달력") },
+                    icon = { Icon(imageVector = Icons.Filled.CalendarMonth, contentDescription = "달력") },
                     label = { Text("달력") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { onSelectTab(2) },
-                    icon = { Icon(Icons.Filled.Person, contentDescription = "내정보") },
+                    icon = { Icon(imageVector = Icons.Filled.Person, contentDescription = "내정보") },
                     label = { Text("내정보") }
                 )
             }
         }
     ) { inner ->
-        Box(Modifier.fillMaxSize().padding(inner)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues = inner)
+        ) {
             when (selectedTab) {
                 0 -> startScreen()
                 1 -> calendarScreen()
@@ -71,95 +75,101 @@ fun AppWithBottomTabs(
     }
 }
 
-/* ----------------------------- Start 탭 ----------------------------- */
+/* ---------------- 네비 상태 + 저장소 연결 ---------------- */
 
-@Composable
-private fun StartTab(onRequestGoCalendar: () -> Unit) {
-    val repo = LocalAppRepo.current
-
-    // 폼 열기 플래그
-    var showForm by remember { mutableStateOf(false) }
-
-    // 저장소 상태 구독
-    val albas by repo.albas.collectAsState()
-    val schedules by repo.schedules.collectAsState()
-
-    if (showForm) {
-        // 폼 화면 – 저장하면 저장소에 반영
-        AlbaFormScreen(
-            onBack = { showForm = false },
-            onSubmit = { res ->
-                repo.saveAlbaForm(res)   // 매장명 중복 체크/초기 스케줄 생성은 저장소에서 처리
-                showForm = false
-            }
-        )
-        return
-    }
-
-    // 네가 올린 스타트 화면 그대로 사용
-    AlbaStartScreen(
-        onBack = { /* 메인 탭은 뒤로 없음 */ },
-        onGoToAlbaForm = { showForm = true },
-        albas = albas,
-        schedules = schedules,
-        onAddWork = { albaId, y, m, d, sh, sm, eh, em, br ->
-            repo.addSchedule(
-                UICalendarSchedule(
-                    albaId = albaId,
-                    year = y, month = m, day = d,
-                    startHour = sh, startMinute = sm,
-                    endHour = eh, endMinute = em,
-                    breakMinutes = br
-                )
-            )
-            // 추가 후 바로 달력으로 이동하고 싶으면 아래 주석 해제
-            // onRequestGoCalendar()
-        }
-    )
+/** 탭 0(메인) 안에서만 사용하는 루트 화면들 */
+private sealed interface MainRoot {
+    data object Start : MainRoot
+    data class Form(val albaId: String? = null) : MainRoot // albaId==null이면 신규
 }
 
-/* ----------------------------- Calendar 탭 ----------------------------- */
-
 @Composable
-private fun CalendarTab() {
+fun AppWithBottomTabs() {
     val repo = LocalAppRepo.current
     val albas by repo.albas.collectAsState()
     val schedules by repo.schedules.collectAsState()
 
-    CalendarScreen(
-        onBack = { /* no-op */ },
+    var selectedTab by remember { mutableStateOf(0) }
+    var mainRoot by remember { mutableStateOf<MainRoot>(MainRoot.Start) }
 
-        albas = albas,
-        schedules = schedules,
-
-        onDeleteSchedule = { id -> repo.deleteSchedule(id) },
-        onUpdateSchedule = { s -> repo.updateSchedule(s) },
-        onAddSchedule = { s -> repo.addSchedule(s) },
-
-        onApplyWageForward = { aid, y, m, d, startMin, w ->
-            repo.applyWageForward(aid, y, m, d, startMin, w)
+    AppWithBottomTabs(
+        selectedTab = selectedTab,
+        onSelectTab = { tab ->
+            selectedTab = tab
+            // 탭 이동 시 메인 루트는 유지(폼 작성 중 탭 바꿨다가 돌아와도 계속 이어서 작성 가능)
         },
+        /* ---------------- 메인 탭(알바 스타트/폼) ---------------- */
+        startScreen = {
+            when (val screen = mainRoot) {
+                MainRoot.Start -> AlbaStartScreen(
+                    onBack = { /* no-op */ },
+                    onGoToAlbaForm = { mainRoot = MainRoot.Form(null) },
+                    onEditAlba = { id -> mainRoot = MainRoot.Form(id) },
+                    albas = albas,
+                    schedules = schedules,
+                    onAddWork = { aid, y, m, d, sh, sm, eh, em, br ->
+                        repo.addSchedule(
+                            UICalendarSchedule(
+                                albaId = aid,
+                                year = y, month = m, day = d,
+                                startHour = sh, startMinute = sm,
+                                endHour = eh, endMinute = em,
+                                breakMinutes = br
+                            )
+                        )
+                    }
+                )
 
-        getSurchargePolicy = { aid -> repo.getProfile(aid).surcharge },
-        saveSurchargePolicy = { aid, pol -> repo.updateAlba(aid, com.paycount.app.AlbaPatch(surcharge = pol)) },
+                is MainRoot.Form -> {
+                    val initial: AlbaFormInitial? = screen.albaId?.let { id ->
+                        repo.getFormInitial(id)
+                    }
 
-        getTaxPolicy = { aid -> repo.getProfile(aid).tax },
-        getInsurancePolicy = { aid -> repo.getProfile(aid).insurance },
-
-        goToAlbaForm = { /* 필요한 경우 Start 탭에서 열기 */ }
-    )
-}
-
-/* ----------------------------- Profile 탭 ----------------------------- */
-
-@Composable
-private fun ProfileTab() {
-    Scaffold(topBar = { CenterAlignedTopAppBar(title = { Text("내정보") }) }) { inner ->
-        Box(Modifier.fillMaxSize().padding(inner)) {
+                    AlbaFormScreen(
+                        onBack = { mainRoot = MainRoot.Start },
+                        onSubmit = { result ->
+                            if (screen.albaId == null) {
+                                repo.saveAlbaForm(result)          // 신규
+                            } else {
+                                repo.updateAlbaFromForm(screen.albaId, result) // 수정
+                            }
+                            mainRoot = MainRoot.Start
+                            selectedTab = 0
+                        },
+                        existingSchedules = schedules,
+                        initial = initial
+                    )
+                }
+            }
+        },
+        /* ---------------- 달력 탭 ---------------- */
+        calendarScreen = {
+            CalendarScreen(
+                onBack = { selectedTab = 0 },
+                albas = albas,
+                schedules = schedules,
+                onDeleteSchedule = { repo.deleteSchedule(it) },
+                onUpdateSchedule = { repo.updateSchedule(it) },
+                onAddSchedule = { repo.addSchedule(it) },
+                onApplyWageForward = { aid, y, m, d, startMin, newWage ->
+                    repo.applyWageForward(aid, y, m, d, startMin, newWage)
+                },
+                getSurchargePolicy = { repo.getProfile(it).surcharge },
+                saveSurchargePolicy = { aid, p ->
+                    repo.updateAlba(aid, AlbaPatch(surcharge = p))
+                },
+                getTaxPolicy = { repo.getProfile(it).tax },
+                getInsurancePolicy = { repo.getProfile(it).insurance },
+                goToAlbaForm = { selectedTab = 0; mainRoot = MainRoot.Form(it) }
+            )
+        },
+        /* ---------------- 내정보 탭 ---------------- */
+        profileScreen = {
             Text(
-                "프로필 화면은 추후 연결 예정",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "내정보 화면 준비중",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(24.dp)
             )
         }
-    }
+    )
 }

@@ -1,5 +1,4 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.paycount.app.common
 
 import androidx.compose.foundation.background
@@ -8,21 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,10 +21,8 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
-/* -------------------- 시간 시트 -------------------- */
+/* -------------------- 시간 시트 (오버나이트 허용) -------------------- */
 @Composable
 fun TimeSheet(
     startH: Int,
@@ -53,17 +37,35 @@ fun TimeSheet(
     var eH by remember { mutableIntStateOf(endH) }
     var eM by remember { mutableIntStateOf(endM) }
 
+    // 종료가 시작보다 이르면 → 다음날로 해석(표시만)
+    val overnight by derivedStateOf {
+        val st = sH * 60 + sM
+        val et = eH * 60 + eM
+        et <= st
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SheetHeaderMini("근무시간", onBack = onDismiss) { onDone(sH, sM, eH, eM) }
+
         Column(
             Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("시작", style = MaterialTheme.typography.titleMedium)
             TimeWheels(hour24 = sH, minute = sM) { h, m -> sH = h; sM = m }
+
             HorizontalDivider()
+
             Text("종료", style = MaterialTheme.typography.titleMedium)
             TimeWheels(hour24 = eH, minute = eM) { h, m -> eH = h; eM = m }
+
+            // 선택 미리보기(다음날 라벨)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "선택: ${fmtAmPm(sH, sM)} ~ ${fmtAmPm(eH, eM)}" + if (overnight) " (다음날)" else "",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -87,26 +89,34 @@ private fun TimeWheels(
         WheelCyclic(
             items = listOf("오전", "오후"),
             selectedIndex = if (isPm) 1 else 0,
-            onSelected = { idx -> isPm = idx == 1; onChange(to24(h12, m, isPm), m) },
+            onSelected = { idx ->
+                isPm = idx == 1
+                onChange(to24(h12, isPm), m)
+            },
             widthDp = 84, visibleCount = 2, rowHeight = 40.dp
         )
         WheelCyclic(
             items = (1..12).map { it.toString().padStart(2, '0') },
             selectedIndex = h12 - 1,
-            onSelected = { idx -> h12 = idx + 1; onChange(to24(h12, m, isPm), m) },
+            onSelected = { idx ->
+                h12 = idx + 1
+                onChange(to24(h12, isPm), m)
+            },
             widthDp = 72, visibleCount = 3, rowHeight = 40.dp
         )
         WheelCyclic(
             items = (0..55 step 5).map { it.toString().padStart(2, '0') },
             selectedIndex = m / 5,
-            onSelected = { idx -> m = idx * 5; onChange(to24(h12, m, isPm), m) },
+            onSelected = { idx ->
+                m = idx * 5
+                onChange(to24(h12, isPm), m)
+            },
             widthDp = 72, visibleCount = 3, rowHeight = 40.dp
         )
     }
 }
 
-private fun to24(h12: Int, @Suppress("UNUSED_PARAMETER") m: Int, pm: Boolean): Int =
-    (h12 % 12) + if (pm) 12 else 0
+private fun to24(h12: Int, pm: Boolean): Int = (h12 % 12) + if (pm) 12 else 0
 
 /* -------------------- 루프 휠 (public) -------------------- */
 @Composable
@@ -139,7 +149,7 @@ fun WheelCyclic(
                 val realIdx = (idx % itemCount + itemCount) % itemCount
                 val add = if (state.firstVisibleItemScrollOffset > rowPx / 2f) 1 else 0
                 val center = state.firstVisibleItemIndex + selectRow + add
-                val dist = abs(idx - center)
+                val dist = kotlin.math.abs(idx - center)
                 val isSel = dist == 0
                 val alpha = when (dist) { 0 -> 1f; 1 -> 0.55f; else -> 0.25f }
                 Box(
@@ -162,7 +172,7 @@ fun WheelCyclic(
                 }
             }
         }
-        // 스크롤 멈췄을 때 중앙으로 스냅 + 선택 콜백
+        // 스크롤 멈추면 중앙으로 스냅 + 선택 콜백
         LaunchedEffect(state.isScrollInProgress) {
             if (!state.isScrollInProgress) {
                 val base = state.firstVisibleItemIndex
@@ -246,7 +256,7 @@ fun DateMultiDialog(
     }
 }
 
-/* 간단화한 AlertDialog 래퍼(타이틀 바에 월 이동 버튼 배치) */
+/* 간단 AlertDialog 래퍼 */
 @Composable
 private fun ModalAlertDialog(
     curYm: YearMonth,
@@ -256,7 +266,7 @@ private fun ModalAlertDialog(
     onConfirm: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onConfirm) { Text("완료") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("‹ 뒤로") } },
@@ -347,7 +357,7 @@ fun SheetHeaderMini(title: String, onBack: () -> Unit, onDone: () -> Unit) {
     }
 }
 
-/* -------------------- 공용 유틸: 색상/시각 포맷 -------------------- */
+/* -------------------- 공용 유틸 -------------------- */
 fun parseColor(hex: String): Color = try {
     Color(android.graphics.Color.parseColor(hex))
 } catch (_: Throwable) {
