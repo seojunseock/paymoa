@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "39720603442",
+    "project_id": "paycount-9dda8",
+    "storage_bucket": "paycount-9dda8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39720603442:android:c2088f9b448133cd25512b",
+        "android_client_info": {
+          "package_name": "com.paycount.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "39720603442-6bn4boqpfcmfatqa72ljd4hrdau3casd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paycount.app",
+            "certificate_hash": "a8e6fe6c10b9acd5fda7b924b790f1a61e4df782"
+          }
+        },
+        {
+          "client_id": "39720603442-9erfopkebeaokc38a5t9pahhpv26sm17.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrgo1tYgk8i8n0rUepWPs-8x2j4BSZOYU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "39720603442-9erfopkebeaokc38a5t9pahhpv26sm17.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
