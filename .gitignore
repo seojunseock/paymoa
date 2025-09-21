@@ -1,0 +1,108 @@
+# -----------------------------
+# Flutter / Dart
+# -----------------------------
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.melos_tool/
+.flutter-versions
+
+# Build outputs
+build/
+**/GeneratedPluginRegistrant.*
+**/flutter_export_environment.sh
+
+# Coverage
+coverage/
+
+# -----------------------------
+# IDE / Editor
+# -----------------------------
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# -----------------------------
+# Android
+# -----------------------------
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/captures/
+android/**/outputs/
+android/**/generated/
+# Keystore & signing
+*.keystore
+*.jks
+android/key.properties
+
+# Firebase (Android)
+android/app/google-services.json
+
+# -----------------------------
+# iOS
+# -----------------------------
+ios/.generated/
+ios/.symlinks/
+ios/Flutter/.last_build_id
+ios/Flutter/Generated.xcconfig
+ios/Runner/GeneratedPluginRegistrant.*
+# CocoaPods (선호에 따라 제외 가능하나 일반적으로 커밋하지 않음)
+ios/Pods/
+ios/Podfile.lock
+
+# Firebase (iOS)
+ios/Runner/GoogleService-Info.plist
+
+# -----------------------------
+# macOS
+# -----------------------------
+macos/.generated/
+macos/Flutter/GeneratedPluginRegistrant.*
+macos/Runner/GoogleService-Info.plist
+macos/Pods/
+macos/Podfile.lock
+
+# -----------------------------
+# Windows
+# -----------------------------
+windows/**/GeneratedFiles/
+windows/flutter/ephemeral/
+
+# -----------------------------
+# Linux
+# -----------------------------
+linux/**/generated/
+linux/flutter/ephemeral/
+
+# -----------------------------
+# Web
+# -----------------------------
+# 빌드 산출물
+web/.dart_tool/
+# 서비스워커 등은 보통 커밋하지만, 커스텀 키가 있을 경우 예외 처리
+# web/firebase-messaging-sw.js
+
+# -----------------------------
+# Firebase / Secrets (공통)
+# -----------------------------
+.env
+.env.*
+*.env
+*.secrets
+# flutterfire 자동 생성 옵션 파일(키 노출 우려 시 제외)
+lib/firebase_options.dart
+# 템플릿은 커밋 권장
+!lib/firebase_options.sample.dart
+
+# -----------------------------
+# Logs / OS files
+# -----------------------------
+*.log
+*.pid
+*.seed
+.DS_Store
+Thumbs.db
