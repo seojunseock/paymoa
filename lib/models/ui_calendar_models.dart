@@ -1,6 +1,6 @@
 import 'dart:math';
 
-enum WorkType { basic, substitute, overtime, holiday, night }
+enum WorkType { basic, substitute, overtime, holiday, night, weekly }
 
 class UICalendarAlba {
   UICalendarAlba({
@@ -10,6 +10,7 @@ class UICalendarAlba {
     this.hourlyWage = 9860,
     this.payDay = 25,
   });
+
   final String id;
   final String name;
   final String colorHex;
@@ -21,9 +22,13 @@ class UICalendarSchedule {
   UICalendarSchedule({
     String? id,
     required this.albaId,
-    required this.year, required this.month, required this.day,
-    required this.startHour, required this.startMinute,
-    required this.endHour,   required this.endMinute,
+    required this.year,
+    required this.month,
+    required this.day,
+    required this.startHour,
+    required this.startMinute,
+    required this.endHour,
+    required this.endMinute,
     this.breakMinutes = 0,
     this.overrideHourlyWage,
     this.workType = WorkType.basic,
@@ -37,7 +42,6 @@ class UICalendarSchedule {
   final int? overrideHourlyWage;
   final WorkType workType;
 
-  // 간단 랜덤 ID
   static String _rand() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     final r = Random();

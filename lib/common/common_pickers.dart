@@ -1,6 +1,7 @@
 // lib/common/common_pickers.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart'; // PointerScrollEvent
+import 'package:table_calendar/table_calendar.dart'; // ← TableCalendar
 
 /* ---------------------------------------------------------------------------
  * 공통 유틸
@@ -43,8 +44,6 @@ String fmtAmPm(int h24, int m) {
 
 /* ---------------------------------------------------------------------------
  * 시간 설정 (갤럭시/아이폰 휠 느낌) - 다이얼로그
- *  - 상단: 취소 / 제목 / 완료 (가로)
- *  - 하단: 현재 선택 프리뷰 (실시간 갱신, 중앙 정렬)
  * -------------------------------------------------------------------------*/
 Future<void> showTimeSheet({
   required BuildContext context,
@@ -488,9 +487,7 @@ Widget _seg(String text, bool on, VoidCallback tap) {
 }
 
 /* ---------------------------------------------------------------------------
- * 급여일 시트 (실시간 미리보기 업데이트)
- *  - 상단: 취소 / 제목 / 완료 (가로)
- *  - 하단: "매월 N일" 중앙 정렬, 휠 움직일 때 즉시 갱신
+ * 급여일 시트
  * -------------------------------------------------------------------------*/
 Future<void> showPaydaySheet({
   required BuildContext context,
@@ -568,4 +565,282 @@ Future<void> showPaydaySheet({
       );
     },
   );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * TableCalendar 기반 멀티 날짜 선택 다이얼로그
+ *  - 포맷 전환 버튼(2 weeks/Week) 제거, YYYY년 M월만 노출
+ *  - 요일 라벨 절대 안 잘리도록 높이/라인 높이 조정
+ *  - 오늘: 초록색 숫자 / 오늘이 비활성일 경우 연한 초록색
+ * ────────────────────────────────────────────────────────────────*/
+Future<Set<DateTime>?> showAlbaDatePickerDialog(
+  BuildContext context, {
+  Set<DateTime>? initialUtc,
+  DateTime? initialFocusedDay,
+  DateTime? firstDay,
+  DateTime? lastDay,
+  bool Function(DateTime utc)? checkConflict, // true면 비활성화
+}) {
+  return showDialog<Set<DateTime>>(
+    context: context,
+    barrierDismissible: true,
+    builder: (_) => _AlbaMultiDateDialog(
+      initialUtc: initialUtc ?? <DateTime>{},
+      focused: initialFocusedDay ?? DateTime.now(),
+      firstDay: firstDay ?? DateTime.utc(2010, 1, 1),
+      lastDay: lastDay ?? DateTime.utc(2035, 12, 31),
+      checkConflict: checkConflict,
+    ),
+  );
+}
+
+class _AlbaMultiDateDialog extends StatefulWidget {
+  const _AlbaMultiDateDialog({
+    required this.initialUtc,
+    required this.focused,
+    required this.firstDay,
+    required this.lastDay,
+    this.checkConflict,
+  });
+
+  final Set<DateTime> initialUtc;
+  final DateTime focused;
+  final DateTime firstDay;
+  final DateTime lastDay;
+  final bool Function(DateTime utc)? checkConflict;
+
+  @override
+  State<_AlbaMultiDateDialog> createState() => _AlbaMultiDateDialogState();
+}
+
+class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
+  late DateTime _focusedDay;
+  late Set<DateTime> _selectedUtc; // UTC 00:00 집합
+
+  @override
+  void initState() {
+    super.initState();
+    _focusedDay = _dateOnly(widget.focused);
+    _selectedUtc = widget.initialUtc.map(_dateOnlyUtc).toSet();
+  }
+
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+  static DateTime _dateOnlyUtc(DateTime d) => DateTime.utc(d.year, d.month, d.day);
+
+  bool _isSelectedLocal(DateTime localDay) {
+    return _selectedUtc.any((u) =>
+        u.year == localDay.year && u.month == localDay.month && u.day == localDay.day);
+  }
+
+  bool _isDisabledLocal(DateTime localDay) {
+    if (widget.checkConflict == null) return false;
+    final utc = _dateOnlyUtc(localDay);
+    return widget.checkConflict!(utc);
+  }
+
+  bool _isToday(DateTime localDay) {
+    final now = DateTime.now();
+    return now.year == localDay.year && now.month == localDay.month && now.day == localDay.day;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TableCalendar(
+                locale: 'ko_KR',
+                firstDay: widget.firstDay,
+                lastDay: widget.lastDay,
+                focusedDay: _focusedDay,
+
+                headerVisible: true,
+                calendarFormat: CalendarFormat.month,
+                headerStyle: HeaderStyle(
+                  formatButtonVisible: false,
+                  titleCentered: true,
+                  leftChevronVisible: true,
+                  rightChevronVisible: true,
+                  headerPadding: const EdgeInsets.symmetric(vertical: 8),
+                  titleTextFormatter: (date, locale) => '${date.year}년 ${date.month}월',
+                  titleTextStyle: theme.textTheme.titleMedium!,
+                ),
+                startingDayOfWeek: StartingDayOfWeek.sunday,
+
+                // ✅ 요일 라벨 안 잘림: 높이+라인높이+overflow 조정
+                daysOfWeekHeight: 28,
+                daysOfWeekStyle: DaysOfWeekStyle(
+                  weekendStyle: TextStyle(
+                    color: theme.colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                  weekdayStyle: TextStyle(
+                    color: theme.colorScheme.onSurface.withOpacity(0.75),
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+
+                // 멀티선택: predicate로 표시, onDaySelected에서 토글
+                selectedDayPredicate: (day) => _isSelectedLocal(day),
+                onDaySelected: (selectedDay, focusedDay) {
+                  final dLocal = _dateOnly(selectedDay);
+                  if (_isDisabledLocal(dLocal)) return;
+
+                  final u = _dateOnlyUtc(dLocal);
+                  setState(() {
+                    if (_selectedUtc.contains(u)) {
+                      _selectedUtc.remove(u);
+                    } else {
+                      _selectedUtc.add(u);
+                    }
+                    _focusedDay = focusedDay;
+                  });
+                },
+                onPageChanged: (fd) => _focusedDay = fd,
+
+                enabledDayPredicate: (day) => !_isDisabledLocal(day),
+
+                // 셀 렌더링 커스텀(오늘/비활성/기본)
+                calendarBuilders: CalendarBuilders(
+                  // 요일 헤더(일=빨강, 토=파랑) - overflow 방지
+                  dowBuilder: (ctx, day) {
+                    const labels = ['일', '월', '화', '수', '목', '금', '토'];
+                    final idx = day.weekday % 7;
+                    final isSun = idx == 0;
+                    final isSat = idx == 6;
+                    final color = isSun
+                        ? Colors.redAccent
+                        : isSat
+                            ? Colors.blueAccent
+                            : theme.colorScheme.onSurface.withOpacity(0.75);
+                    return Center(
+                      child: Text(
+                        labels[idx],
+                        overflow: TextOverflow.visible,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                        ),
+                      ),
+                    );
+                  },
+
+                  // 오늘: 초록색 텍스트, 도형 데코 없음
+                  todayBuilder: (ctx, day, _) {
+                    final disabled = _isDisabledLocal(day);
+                    final color = disabled ? Colors.green.withOpacity(0.45) : Colors.green;
+                    return Center(
+                      child: Text(
+                        '${day.day}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    );
+                  },
+
+                  // 비활성 셀: 회색(오늘은 위 todayBuilder에서 처리해 연한 초록)
+                  disabledBuilder: (ctx, day, _) {
+                    final isToday = _isToday(day);
+                    if (isToday) {
+                      // 오늘+비활성 → 연한 초록색
+                      return Center(
+                        child: Text(
+                          '${day.day}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.green.withOpacity(0.45),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      );
+                    }
+                    return Center(
+                      child: Text(
+                        '${day.day}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withOpacity(0.30),
+                        ),
+                      ),
+                    );
+                  },
+
+                  // 일반 셀(일/토 색상)
+                  defaultBuilder: (ctx, day, _) {
+                    final isSun = day.weekday == DateTime.sunday;
+                    final isSat = day.weekday == DateTime.saturday;
+                    final color = isSun
+                        ? Colors.redAccent
+                        : isSat
+                            ? Colors.blueAccent
+                            : theme.colorScheme.onSurface;
+                    return Center(
+                      child: Text(
+                        '${day.day}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                calendarStyle: CalendarStyle(
+                  outsideDaysVisible: false,
+                  isTodayHighlighted: true, // todayBuilder로 렌더링
+                  // todayDecoration은 todayBuilder를 쓰므로 의미 없음(투명)
+                  todayDecoration: const BoxDecoration(),
+                  selectedDecoration: BoxDecoration(
+                    color: theme.colorScheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  selectedTextStyle: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+
+              // 하단 버튼
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      child: const Text('취소'),
+                    ),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () {
+                        final out = _selectedUtc.toList()..sort((a, b) => a.compareTo(b));
+                        Navigator.of(context).pop(out.toSet());
+                      },
+                      child: const Text('적용'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

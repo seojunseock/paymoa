@@ -1,48 +1,47 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../models/ui_calendar_models.dart';
 import '../common/common_pickers.dart' as cp;
-import '../policies/policies.dart' as pol; // 네임스페이스만 필요
 import 'date_assign_sheet.dart';
 import 'work_editor_args.dart' as wargs;
+import '../policies/policies.dart' as pol;
+import 'alba_form_screen.dart' show showPolicySheet, polSheetResult;
 
-/* ───────────────────────── 내부 모델(편집 묶음) ───────────────────────── */
+/* ───────────────── 바텀시트 열기 ───────────────── */
 
-class _WorkGroup {
-  _WorkGroup({
-    this.existingScheduleId, // null이면 신규
-    required this.albaId,
-    required this.selectedUtcDates,
-    required this.startH,
-    required this.startM,
-    required this.endH,
-    required this.endM,
-    required this.breakMin,
-  });
-
-  String? existingScheduleId; // 수정 모드일 때 연결된 스케줄 id
-  String albaId;
-
-  /// 달력 선택: UTC 00:00 날짜들
-  Set<DateTime> selectedUtcDates;
-
-  int startH, startM, endH, endM;
-  int breakMin;
+Future<void> showWorkEditorSheet({
+  required BuildContext context,
+  required wargs.WorkEditorArgs args,
+  required List<UICalendarAlba> albas,
+  required List<UICalendarSchedule> schedules,
+  required void Function(UICalendarSchedule s) onAdd,
+  required void Function(UICalendarSchedule s) onUpdate,
+  required void Function(String scheduleId) onDelete,
+  pol.SurchargePolicy? Function(String albaId)? getSurchargePolicy,
+  void Function(String albaId, polSheetResult result)? onUpdatePolicy,
+}) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) {
+      return _WorkEditorSheet(
+        args: args,
+        albas: albas,
+        schedules: schedules,
+        onAdd: onAdd,
+        onUpdate: onUpdate,
+        onDelete: onDelete,
+        getSurchargePolicy: getSurchargePolicy,
+        onUpdatePolicy: onUpdatePolicy,
+      );
+    },
+  );
 }
 
-/* ───────────────────────── 시간 병합용 작은 구조체 ───────────────────────── */
-
-class _Seg {
-  _Seg(this.startMin, this.endMin, this.breakMin);
-
-  /// 기준 날짜 자정(로컬)부터의 분
-  int startMin;
-  /// end가 start보다 작거나 같으면 익일로 간주해 24*60을 더해 둔다.
-  int endMin;
-  int breakMin;
-}
-
-/* ───────────────────────── 화면 ───────────────────────── */
+/* ───────── push로 들어와도 시트만 띄우고 바로 닫히게 ───────── */
 
 class WorkEditorScreen extends StatefulWidget {
   const WorkEditorScreen({
@@ -55,585 +54,712 @@ class WorkEditorScreen extends StatefulWidget {
     required this.onUpdate,
     required this.onDelete,
     required this.onBack,
+    this.onUpdatePolicy,
   });
 
   final wargs.WorkEditorArgs args;
   final List<UICalendarAlba> albas;
   final List<UICalendarSchedule> schedules;
-
-  final pol.SurchargePolicy? Function(String albaId) getSurchargePolicy;
-
-  /// 저장 콜백들(Repo는 AppShell 쪽)
+  final Object? Function(String albaId) getSurchargePolicy;
   final void Function(UICalendarSchedule s) onAdd;
   final void Function(UICalendarSchedule s) onUpdate;
   final void Function(String scheduleId) onDelete;
-
   final VoidCallback onBack;
+  final void Function(String albaId, polSheetResult result)? onUpdatePolicy;
 
   @override
   State<WorkEditorScreen> createState() => _WorkEditorScreenState();
 }
 
 class _WorkEditorScreenState extends State<WorkEditorScreen> {
-  late final bool isEdit = widget.args.mode == wargs.WorkEditorArgsMode.edit;
+  bool _opened = false;
 
-  final List<_WorkGroup> _groups = [];
-  String? _error;
-
-  UICalendarSchedule? _findById(String id) {
-    for (final s in widget.schedules) {
-      if (s.id == id) return s;
-    }
-    return null;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_opened) return;
+    _opened = true;
+    Future.microtask(() async {
+      await showWorkEditorSheet(
+        context: context,
+        args: widget.args,
+        albas: widget.albas,
+        schedules: widget.schedules,
+        onAdd: widget.onAdd,
+        onUpdate: widget.onUpdate,
+        onDelete: widget.onDelete,
+        getSurchargePolicy: (id) {
+          final obj = widget.getSurchargePolicy(id);
+          return (obj is pol.SurchargePolicy) ? obj : null;
+        },
+        onUpdatePolicy: widget.onUpdatePolicy,
+      );
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
-  DateTime? get _presetLocal => widget.args.presetDate;
+  @override
+  Widget build(BuildContext context) =>
+      const Scaffold(backgroundColor: Colors.transparent, body: SizedBox.shrink());
+}
 
-  String get _title {
-    final d = _presetLocal;
-    if (d != null) return '${d.month}/${d.day} 근무 설정';
-    return '근무 설정';
-  }
+/* ───────────────────────────────────────────────────────────────── */
+
+enum _WorkType { basic, substitute, night, overtime, holiday, weekly }
+
+class _WorkEditorSheet extends StatefulWidget {
+  const _WorkEditorSheet({
+    required this.args,
+    required this.albas,
+    required this.schedules,
+    required this.onAdd,
+    required this.onUpdate,
+    required this.onDelete,
+    this.getSurchargePolicy,
+    this.onUpdatePolicy,
+  });
+
+  final wargs.WorkEditorArgs args;
+  final List<UICalendarAlba> albas;
+  final List<UICalendarSchedule> schedules;
+  final void Function(UICalendarSchedule s) onAdd;
+  final void Function(UICalendarSchedule s) onUpdate;
+  final void Function(String scheduleId) onDelete;
+  final pol.SurchargePolicy? Function(String albaId)? getSurchargePolicy;
+  final void Function(String albaId, polSheetResult result)? onUpdatePolicy;
+
+  @override
+  State<_WorkEditorSheet> createState() => _WorkEditorSheetState();
+}
+
+class _WorkEditorSheetState extends State<_WorkEditorSheet> {
+  late final bool _isEdit = widget.args.mode == wargs.WorkEditorArgsMode.edit;
+
+  // 상태
+  String _albaId = '';
+  Set<DateTime> _selectedUtcDates = {};
+  int _startH = 9, _startM = 0, _endH = 18, _endM = 0;
+  int _breakMin = 0;
+  int? _wageOverride;
+  String? _editingScheduleId;
+  String? _inlineWarning;
+
+  _WorkType _workType = _WorkType.basic;
+
+  // UI
+  bool _previewExpanded = true;
 
   @override
   void initState() {
     super.initState();
 
-    if (isEdit && widget.args.scheduleId != null) {
-      // 편집 모드: 해당 스케줄 1개 카드
-      final s = _findById(widget.args.scheduleId!);
-      if (s != null) {
-        _groups.add(_WorkGroup(
-          existingScheduleId: s.id,
-          albaId: s.albaId,
-          selectedUtcDates: {DateTime.utc(s.year, s.month, s.day)},
-          startH: s.startHour,
-          startM: s.startMinute,
-          endH: s.endHour,
-          endM: s.endMinute,
-          breakMin: s.breakMinutes,
-        ));
-      }
-    } else {
-      // 추가 모드
-      final d = _presetLocal;
-      if (d != null) {
-        // 달력에서 빈 날짜를 눌러 들어온 경우에는 기본 카드 없이 시작
-        final hasAny = widget.schedules.any(
-          (s) => s.year == d.year && s.month == d.month && s.day == d.day,
-        );
-        if (!hasAny) {
-          // 비어 있는 날짜 → 카드 생성 안 함(“근무 추가”만 보임)
-        } else {
-          _addGroup(initialDate: d); // 혹시라도 스케줄이 있으면 기본 1개
-        }
-      } else {
-        // 프리셋 날짜가 없을 때만 1개 기본 카드 생성(기존 동작 유지)
-        _addGroup(initialDate: DateTime.now());
+    // 알바 초기값
+    if (widget.args.preselectedAlbaId != null &&
+        widget.albas.any((a) => a.id == widget.args.preselectedAlbaId)) {
+      _albaId = widget.args.preselectedAlbaId!;
+    } else if (widget.albas.isNotEmpty) {
+      _albaId = widget.albas.first.id;
+    }
+
+    // 날짜 초기값
+    final preset = widget.args.presetDate ?? DateTime.now();
+    _selectedUtcDates = {DateTime.utc(preset.year, preset.month, preset.day)};
+
+    // 수정 로딩
+    if (_isEdit && widget.args.scheduleId != null) {
+      final s = widget.schedules.firstWhere(
+        (x) => x.id == widget.args.scheduleId,
+        orElse: () => UICalendarSchedule(
+          id: '',
+          albaId: _albaId,
+          year: preset.year,
+          month: preset.month,
+          day: preset.day,
+          startHour: _startH,
+          startMinute: _startM,
+          endHour: _endH,
+          endMinute: _endM,
+          breakMinutes: _breakMin,
+        ),
+      );
+      if (s.id.isNotEmpty) {
+        _editingScheduleId = s.id;
+        _albaId = s.albaId;
+        _startH = s.startHour; _startM = s.startMinute;
+        _endH = s.endHour; _endM = s.endMinute;
+        _breakMin = s.breakMinutes;
+        _selectedUtcDates = {DateTime.utc(s.year, s.month, s.day)};
+        _workType = _mapBackToWorkType(s.workType);
+        _wageOverride = s.overrideHourlyWage;
       }
     }
   }
 
-  /* ─────────────── 공용 유틸 ─────────────── */
+  /* ───────── 도우미 ───────── */
 
-  UICalendarAlba? _albaById(String id) {
-    for (final a in widget.albas) {
-      if (a.id == id) return a;
-    }
-    return null;
-  }
+  UICalendarAlba? get _alba =>
+      widget.albas.firstWhere(
+        (a) => a.id == _albaId,
+        orElse: () => UICalendarAlba(
+          id: '', name: '', colorHex: '#3B82F6', hourlyWage: 0, payDay: 25),
+      );
 
-  Color _albaColor(String albaId) {
-    final a = _albaById(albaId);
-    if (a == null) return Theme.of(context).colorScheme.outlineVariant;
-    return cp.parseColor(a.colorHex);
-  }
+  Color get _albaColor => cp.parseColor(_alba?.colorHex ?? '#3B82F6');
 
+  String _fmtAm(int h, int m) => cp.fmtAmPm(h, m);
   String _ymd(DateTime d) =>
       '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
 
-  /* ─────────────── 충돌 검사(기존+화면 내 다른 묶음 포함) ─────────────── */
-
-  bool _conflictFor(int groupIndex, DateTime dLocal) {
-    final g = _groups[groupIndex];
-
-    final sMin0 = g.startH * 60 + g.startM;
-    var eMin0 = g.endH * 60 + g.endM;
-    final overnight = eMin0 <= sMin0;
-    if (overnight) eMin0 += 24 * 60;
-
-    bool _rangeOverlapListFromExisting(List<UICalendarSchedule> list, int dayOffset) {
-      for (final sc in list) {
-        if (g.existingScheduleId != null && sc.id == g.existingScheduleId) continue; // 자기 자신 제외
-        var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60;
-        var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60;
-        if (b <= a) b += 24 * 60;
-        if (sMin0 < b && a < eMin0) return true;
-      }
-      return false;
-    }
-
-    bool _rangeOverlapWithOtherGroups(DateTime base, int dayOffset) {
-      final targetUtc = DateTime.utc(base.year, base.month, base.day + dayOffset);
-      for (int j = 0; j < _groups.length; j++) {
-        if (j == groupIndex) continue;
-        final og = _groups[j];
-        // 다른 묶음이 해당 날짜(또는 전/익일)에 선택돼 있을 때만 비교
-        if (!og.selectedUtcDates.contains(targetUtc)) continue;
-
-        var a = og.startH * 60 + og.startM + dayOffset * 24 * 60;
-        var b = og.endH * 60 + og.endM + dayOffset * 24 * 60;
-        if (b <= a) b += 24 * 60;
-        if (sMin0 < b && a < eMin0) return true;
-      }
-      return false;
-    }
-
-    List<UICalendarSchedule> _byYmd(DateTime x) =>
-        widget.schedules.where((it) => it.year == x.year && it.month == x.month && it.day == x.day).toList();
-
-    final prev = DateTime(dLocal.year, dLocal.month, dLocal.day - 1);
-    final next = DateTime(dLocal.year, dLocal.month, dLocal.day + 1);
-
-    final sameList = _byYmd(dLocal);
-    final prevList = _byYmd(prev);
-    final nextList = _byYmd(next);
-
-    final existingHit = _rangeOverlapListFromExisting(sameList, 0) ||
-        _rangeOverlapListFromExisting(prevList, -1) ||
-        _rangeOverlapListFromExisting(nextList, 1);
-
-    final othersHit = _rangeOverlapWithOtherGroups(dLocal, 0) ||
-        _rangeOverlapWithOtherGroups(dLocal, -1) ||
-        _rangeOverlapWithOtherGroups(dLocal, 1);
-
-    return existingHit || othersHit;
+  int _workedMinutes(int sh, int sm, int eh, int em, int br) {
+    final s = sh * 60 + sm;
+    var e = eh * 60 + em;
+    if (e <= s) e += 24 * 60;
+    final w = (e - s) - br;
+    return w.clamp(0, 24 * 60);
   }
 
-  /// 저장 직전 전체 묶음/날짜에 대해 충돌 수집
-  Map<int, List<DateTime>> _collectConflicts() {
-    final map = <int, List<DateTime>>{};
-    for (int i = 0; i < _groups.length; i++) {
-      final g = _groups[i];
-      for (final dUtc in g.selectedUtcDates) {
-        final dLocal = DateTime(dUtc.year, dUtc.month, dUtc.day);
-        if (_conflictFor(i, dLocal)) {
-          (map[i] ??= <DateTime>[]).add(dLocal);
-        }
-      }
-    }
-    return map;
+  String _hoursTextLocal(int minutes) {
+    final h = minutes / 60.0;
+    final intH = h.floor();
+    final isInt = (h - intH).abs() < 0.001;
+    return isInt ? '$intH시간' : '${h.toStringAsFixed(1)}시간';
   }
 
-  Future<bool?> _showConflictDialog(Map<int, List<DateTime>> conf) {
-    // 보기 좋게 그룹/날짜 정렬
-    final entries = conf.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-    return showDialog<bool>(
+  String _money(int n) {
+    final s = n.toString();
+    final b = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      b.write(s[i]);
+      final left = s.length - i - 1;
+      if (left > 0 && left % 3 == 0) b.write(',');
+    }
+    return b.toString();
+  }
+
+  int _dayPayEstimate(int minutes) {
+    final wage = _wageOverride ?? (_alba?.hourlyWage ?? 0);
+    return (wage * minutes) ~/ 60;
+  }
+
+  pol.SurchargePolicy? _currentSurcharge() =>
+      widget.getSurchargePolicy?.call(_albaId);
+
+  /* ───────── 피커(알바 폼 톤 재사용) ───────── */
+
+  Future<void> _pickTimeCupertino() async {
+    int sAmpm = _startH < 12 ? 0 : 1;
+    int sHour = (_startH % 12 == 0) ? 12 : _startH % 12;
+    int sMin = _startM;
+
+    int eAmpm = _endH < 12 ? 0 : 1;
+    int eHour = (_endH % 12 == 0) ? 12 : _endH % 12;
+    int eMin = _endM;
+
+    int to24(int ampmIdx, int h12) {
+      if (h12 == 12) h12 = 0;
+      return ampmIdx == 0 ? h12 : h12 + 12;
+    }
+
+    final ampm = const ['오전', '오후'];
+    final hours = List<int>.generate(12, (i) => i + 1);
+    final minutes = List<int>.generate(60, (i) => i);
+
+    await showModalBottomSheet<void>(
       context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text('겹치는 날짜가 있어요'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 300),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: entries.map((e) {
-                  final g = _groups[e.key];
-                  final albaName = _albaById(g.albaId)?.name ?? '알바';
-                  final days = (e.value..sort((a, b) => a.compareTo(b)))
-                      .map((d) => '• ${_ymd(d)}')
-                      .join('\n');
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text('$albaName\n$days'),
-                  );
-                }).toList(),
-              ),
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: SizedBox(
+            height: 360,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+                    const Spacer(), const Text('근무시간'), const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _startH = to24(sAmpm, sHour); _startM = sMin;
+                          _endH = to24(eAmpm, eHour); _endM = eMin;
+                        });
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('완료'),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Text('시작', style: theme.textTheme.labelLarge),
+                            const SizedBox(height: 6),
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: sAmpm),
+                                      onSelectedItemChanged: (i) => sAmpm = i,
+                                      children: ampm.map((t) => Center(child: Text(t))).toList(),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: hours.indexOf(sHour)),
+                                      onSelectedItemChanged: (i) => sHour = hours[i],
+                                      children: hours.map((h) => Center(child: Text('$h'))).toList(),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: sMin),
+                                      onSelectedItemChanged: (i) => sMin = i,
+                                      children: minutes.map((m) => Center(child: Text(m.toString().padLeft(2, '0')))).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Text('종료', style: theme.textTheme.labelLarge),
+                            const SizedBox(height: 6),
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: eAmpm),
+                                      onSelectedItemChanged: (i) => eAmpm = i,
+                                      children: ampm.map((t) => Center(child: Text(t))).toList(),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: hours.indexOf(eHour)),
+                                      onSelectedItemChanged: (i) => eHour = hours[i],
+                                      children: hours.map((h) => Center(child: Text('$h'))).toList(),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: CupertinoPicker(
+                                      itemExtent: 36,
+                                      scrollController: FixedExtentScrollController(initialItem: eMin),
+                                      onSelectedItemChanged: (i) => eMin = i,
+                                      children: minutes.map((m) => Center(child: Text(m.toString().padLeft(2, '0')))).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${_fmtAm(to24(sAmpm, sHour), sMin)} ~ ${_fmtAm(to24(eAmpm, eHour), eMin)}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('수정하러 가기'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('그대로 저장'),
-            ),
-          ],
         );
       },
     );
   }
 
-  /* ─────────────── 이벤트 ─────────────── */
-
-  void _addGroup({DateTime? initialDate}) {
-    final firstAlba = widget.albas.isNotEmpty ? widget.albas.first.id : '';
-    final d = initialDate ?? _presetLocal ?? DateTime.now();
-    setState(() {
-      _groups.add(_WorkGroup(
-        existingScheduleId: null,
-        albaId: firstAlba,
-        selectedUtcDates: {DateTime.utc(d.year, d.month, d.day)},
-        startH: 9,
-        startM: 0,
-        endH: 18,
-        endM: 0,
-        breakMin: 0,
-      ));
-    });
-  }
-
-  void _removeGroupAt(int i) {
-    final g = _groups[i];
-    if (g.existingScheduleId != null) {
-      // 실제 스케줄 삭제
-      widget.onDelete(g.existingScheduleId!);
-    }
-    setState(() {
-      _groups.removeAt(i);
-    });
-    // 카드가 하나도 없을 때는 그대로 빈 화면 유지(요구사항: 근무 추가 버튼만)
-  }
-
-  Future<void> _openDateAssignFor(int i) async {
-    final res = await showDateAssignSheet(
-      context,
-      existing: _groups[i].selectedUtcDates,
-      checkConflict: (utc) => _conflictFor(i, DateTime(utc.year, utc.month, utc.day)),
-    );
-    if (res != null) {
-      setState(() {
-        // 편집 묶음이어도 다중 선택 허용(저장은 병합 로직으로 처리)
-        _groups[i].selectedUtcDates = res.selectedDates.toSet();
-        _error = null;
-      });
-    }
-  }
-
-  Future<void> _openTimePickerFor(int i) async {
-    final g = _groups[i];
-    await cp.showTimeSheet(
-      context: context,
-      startH: g.startH,
-      startM: g.startM,
-      endH: g.endH,
-      endM: g.endM,
-      onDone: (sh, sm, eh, em) {
-        setState(() {
-          g.startH = sh;
-          g.startM = sm;
-          g.endH = eh;
-          g.endM = em;
-        });
-      },
-    );
-  }
-
-  Future<void> _openBreakPickerFor(int i) async {
-    final g = _groups[i];
+  Future<void> _pickBreak() async {
     await cp.showBreakSheet(
       context: context,
-      initialMinutes: g.breakMin,
-      onDone: (m) => setState(() => g.breakMin = m),
+      initialMinutes: _breakMin,
+      onDone: (m) => setState(() => _breakMin = m),
     );
   }
 
-  /* ─────────────── 병합 · 저장 ─────────────── */
+  Future<void> _pickDates() async {
+    final res = await showDateAssignSheet(
+      context,
+      existing: _selectedUtcDates,
+      // 날짜 선택 중에도 모든 알바 기준으로 충돌 미리 표시
+      checkConflict: (utc) => _hasAnyConflictOn(DateTime(utc.year, utc.month, utc.day)),
+    );
+    if (res != null) setState(() => _selectedUtcDates = res.selectedDates.toSet());
+  }
 
-  // 키: albaId|yyyy-mm-dd
-  String _keyOf(String albaId, int y, int m, int d) =>
-      '$albaId|$y-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
+  Future<void> _openPolicySheet() async {
+    final res = await showPolicySheet(
+      context: context,
+      initialTax: pol.TaxConfig.none,
+      initialIns: const pol.InsuranceNone(),
+      initialSurcharge: _currentSurcharge(),
+    );
+    if (res != null) {
+      widget.onUpdatePolicy?.call(_albaId, res);
+      setState(() {}); // 갱신
+    }
+  }
 
-  Future<void> _onPressSave() async {
-    // 간단 유효성
-    for (int i = 0; i < _groups.length; i++) {
-      final g = _groups[i];
-      if (g.albaId.isEmpty) {
-        setState(() => _error = '${i + 1}번째 묶음: 알바를 선택하세요.');
-        return;
+  /* ───────── 겹침 검사(모든 알바 대상, 전일/익일 포함) ───────── */
+
+  bool _hasAnyConflictOn(DateTime localDay) {
+    final sMin0 = _startH * 60 + _startM;
+    var eMin0 = _endH * 60 + _endM;
+    if (eMin0 <= sMin0) eMin0 += 24 * 60;
+
+    bool overlapWith(List<UICalendarSchedule> list, int dayOffset) {
+      for (final sc in list) {
+        if (_editingScheduleId != null && sc.id == _editingScheduleId) continue; // 자기 자신 제외
+        var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60;
+        var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60;
+        if (b <= a) b += 24 * 60;
+        // 반열림 [start, end) 비교: 끝점 맞닿음 허용
+        if (sMin0 < b && a < eMin0) return true;
       }
-      if (g.selectedUtcDates.isEmpty) {
-        setState(() => _error = '${i + 1}번째 묶음: 근무 날짜를 선택하세요.');
-        return;
-      }
+      return false;
     }
 
-    // 충돌 수집 → 팝업
-    final conflicts = _collectConflicts();
+    List<UICalendarSchedule> byYmd(DateTime x) =>
+        widget.schedules.where((s) => s.year == x.year && s.month == x.month && s.day == x.day).toList();
+
+    final same = byYmd(localDay);
+    final prev = byYmd(DateTime(localDay.year, localDay.month, localDay.day - 1));
+    final next = byYmd(DateTime(localDay.year, localDay.month, localDay.day + 1));
+
+    return overlapWith(same, 0) || overlapWith(prev, -1) || overlapWith(next, 1);
+  }
+
+  List<DateTime> _collectConflictDays() {
+    final hits = <DateTime>[];
+    for (final utc in _selectedUtcDates) {
+      final local = DateTime(utc.year, utc.month, utc.day);
+      if (_hasAnyConflictOn(local)) hits.add(local);
+    }
+    hits.sort((a, b) => a.compareTo(b));
+    return hits;
+  }
+
+  /* ───────── 저장/삭제 ───────── */
+
+  Future<void> _save() async {
+    setState(() => _inlineWarning = null);
+
+    if (_albaId.isEmpty) {
+      setState(() => _inlineWarning = '알바를 선택하세요.');
+      _showInlineWarningIfAny();
+      return;
+    }
+    if (_selectedUtcDates.isEmpty) {
+      setState(() => _inlineWarning = '근무 날짜를 선택하세요.');
+      _showInlineWarningIfAny();
+      return;
+    }
+
+    // 🔴 저장 직전 전역 겹침 검사 (모든 알바)
+    final conflicts = _collectConflictDays();
     if (conflicts.isNotEmpty) {
-      final proceed = await _showConflictDialog(conflicts);
-      if (proceed != true) return; // “수정하러 가기”
-    }
-    _saveAll(); // “그대로 저장” → 병합/대체 저장
-  }
-
-  void _saveAll() {
-    // 1) 이번 저장으로 영향 받는 키 수집(원래 키 포함)
-    final affectedKeys = <String>{};
-    final editedOriginalKeys = <String>{}; // 편집 전 원래 키(날짜 변경 가능)
-    for (final g in _groups) {
-      for (final d in g.selectedUtcDates) {
-        affectedKeys.add(_keyOf(g.albaId, d.year, d.month, d.day));
-      }
-      if (g.existingScheduleId != null) {
-        final s = _findById(g.existingScheduleId!);
-        if (s != null) {
-          editedOriginalKeys.add(_keyOf(s.albaId, s.year, s.month, s.day));
-        }
-      }
-    }
-    affectedKeys.addAll(editedOriginalKeys);
-
-    // 2) 키별로 기존 스케줄 → 세그먼트 수집
-    final map = <String, List<_Seg>>{};
-    void addSeg(String key, _Seg seg) {
-      map.putIfAbsent(key, () => <_Seg>[]).add(seg);
+      final msg = conflicts.map(_ymd).join(', ');
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('겹치는 알바가 있습니다'),
+          content: Text('$msg 에 같은 시간대의 다른 근무가 있어 저장할 수 없어요.\n시간을 조정한 뒤 다시 시도해 주세요.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인')),
+          ],
+        ),
+      );
+      return; // ✅ 저장 차단
     }
 
-    // 기존 스케줄(편집 중인 건 일단 제외, 아래서 새 값으로 다시 넣음)
-    for (final sc in widget.schedules) {
-      final key = _keyOf(sc.albaId, sc.year, sc.month, sc.day);
-      if (!affectedKeys.contains(key)) continue;
-      bool skip = false;
-      for (final g in _groups) {
-        if (g.existingScheduleId != null && g.existingScheduleId == sc.id) {
-          skip = true;
-          break;
-        }
-      }
-      if (skip) continue;
-
-      final s0 = sc.startHour * 60 + sc.startMinute;
-      var e0 = sc.endHour * 60 + sc.endMinute;
-      if (e0 <= s0) e0 += 24 * 60; // 오버나이트 보정
-      addSeg(key, _Seg(s0, e0, sc.breakMinutes));
-    }
-
-    // 이번에 저장할 묶음 → 세그먼트로 추가
-    for (final g in _groups) {
-      for (final d in g.selectedUtcDates) {
-        final key = _keyOf(g.albaId, d.year, d.month, d.day);
-        final s0 = g.startH * 60 + g.startM;
-        var e0 = g.endH * 60 + g.endM;
-        if (e0 <= s0) e0 += 24 * 60;
-        addSeg(key, _Seg(s0, e0, g.breakMin));
-      }
-    }
-
-    // 3) 키별 세그먼트 병합 (연속/겹침이면 합치고, 1분이라도 띄면 분리)
-    List<_Seg> _merge(List<_Seg> list) {
-      if (list.isEmpty) return list;
-      list.sort((a, b) => a.startMin.compareTo(b.startMin));
-      final out = <_Seg>[];
-      var cur = _Seg(list.first.startMin, list.first.endMin, list.first.breakMin);
-      for (int i = 1; i < list.length; i++) {
-        final s = list[i];
-        if (s.startMin <= cur.endMin) {
-          // 이어지거나 겹치면 병합
-          cur.endMin = (s.endMin > cur.endMin) ? s.endMin : cur.endMin;
-          cur.breakMin += s.breakMin; // 휴게는 합산
-        } else {
-          out.add(cur);
-          cur = _Seg(s.startMin, s.endMin, s.breakMin);
-        }
-      }
-      out.add(cur);
-      return out;
-    }
-
-    // 4) 실제 저장: 해당 키의 기존 스케줄 전부 삭제 → 병합 결과로 재생성
-    for (final key in affectedKeys) {
-      // key 파싱
-      final parts = key.split('|');
-      final albaId = parts[0];
-      final ymd = parts[1].split('-');
-      final y = int.parse(ymd[0]);
-      final m = int.parse(ymd[1]);
-      final d = int.parse(ymd[2]);
-
-      // 삭제
-      for (final sc in widget.schedules) {
-        if (sc.albaId == albaId && sc.year == y && sc.month == m && sc.day == d) {
-          widget.onDelete(sc.id);
-        }
-      }
-
-      // 병합 결과로 재생성
-      final merged = _merge(map[key] ?? const <_Seg>[]);
-      for (final seg in merged) {
-        final startMin = seg.startMin;
-        final endMin = seg.endMin;
-
-        final startH = (startMin ~/ 60) % 24;
-        final startM = startMin % 60;
-
-        final endMinNorm = endMin % (24 * 60);
-        final endH = (endMinNorm ~/ 60) % 24;
-        final endM = endMinNorm % 60;
-
-        widget.onAdd(UICalendarSchedule(
+    if (_isEdit && _editingScheduleId != null) {
+      final d = _selectedUtcDates.first;
+      final s = UICalendarSchedule(
+        id: _editingScheduleId!,
+        albaId: _albaId,
+        year: d.year, month: d.month, day: d.day,
+        startHour: _startH, startMinute: _startM,
+        endHour: _endH, endMinute: _endM,
+        breakMinutes: _breakMin,
+        workType: _mapWorkType(_workType),
+        overrideHourlyWage: _wageOverride,
+      );
+      widget.onUpdate(s);
+    } else {
+      for (final d in _selectedUtcDates) {
+        final s = UICalendarSchedule(
           id: '',
-          albaId: albaId,
-          year: y,
-          month: m,
-          day: d,
-          startHour: startH,
-          startMinute: startM,
-          endHour: endH,
-          endMinute: endM,
-          breakMinutes: seg.breakMin,
-        ));
+          albaId: _albaId,
+          year: d.year, month: d.month, day: d.day,
+          startHour: _startH, startMinute: _startM,
+          endHour: _endH, endMinute: _endM,
+          breakMinutes: _breakMin,
+          workType: _mapWorkType(_workType),
+          overrideHourlyWage: _wageOverride,
+        );
+        widget.onAdd(s);
       }
     }
 
-    widget.onBack();
+    if (mounted) Navigator.of(context).pop();
   }
 
-  /* ─────────────── UI ─────────────── */
+  void _showInlineWarningIfAny() {
+    if (_inlineWarning == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_inlineWarning!), behavior: SnackBarBehavior.floating),
+    );
+  }
 
-  String _datesLabel(Set<DateTime> set) {
-    if (set.isEmpty) return '없음';
-    final list = set.toList()..sort((a, b) => a.compareTo(b));
-    if (list.length == 1) {
-      final d = list.first;
-      return _ymd(d);
+  Future<void> _deleteIfEdit() async {
+    if (!_isEdit || _editingScheduleId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('이 근무를 삭제할까요?'),
+        content: const Text('삭제 후 되돌릴 수 없습니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('삭제')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      widget.onDelete(_editingScheduleId!);
+      if (mounted) Navigator.of(context).pop();
     }
-    return '${list.length}일';
   }
+
+  /* ───────── UI ───────── */
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final timeRange =
+        '${_fmtAm(_startH, _startM)} ~ ${_fmtAm(_endH, _endM)}'
+        '${((_endH * 60 + _endM) <= (_startH * 60 + _startM)) ? " (다음날)" : ""}';
+
+    final surcharge = _currentSurcharge();
+    final surchargeSummary = () {
+      if (surcharge == null) return '없음';
+      final l = <String>[];
+      if (surcharge.weeklyHolidayEnabled) l.add('주휴 ON');
+      if (surcharge.overtimeEnabled) l.add('연장 +${_trimPct(surcharge.overtimePercent)}%');
+      if (surcharge.holidayEnabled) l.add('휴일 +${_trimPct(surcharge.holidayPercent)}%');
+      if (surcharge.nightEnabled) l.add('야간 +${_trimPct(surcharge.nightPercent)}%');
+      return l.isEmpty ? '없음' : l.join(', ');
+    }();
+
     return Scaffold(
       appBar: AppBar(
-        leading: TextButton(onPressed: widget.onBack, child: const Text('뒤로')),
-        title: Text(_title),
+        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+        title: Text(_isEdit ? '근무 수정' : '근무 추가'),
         centerTitle: true,
         actions: [
-          TextButton(onPressed: _onPressSave, child: const Text('저장')),
+          if (_isEdit)
+            IconButton(tooltip: '삭제', icon: const Icon(Icons.delete_outline), onPressed: _deleteIfEdit),
+          TextButton(onPressed: _save, child: const Text('저장')),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 상단: 근무 추가 버튼(가로 전체)
-          FilledButton.icon(
-            onPressed: () => _addGroup(),
-            icon: const Icon(Icons.add),
-            label: const Text('근무 추가'),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          _Card(
+            title: '어떤 알바인가요?',
+            child: Row(
+              children: [
+                Flexible(
+                  child: DropdownButtonFormField<String>(
+                    value: _albaId.isEmpty ? null : _albaId,
+                    items: widget.albas.map((a) =>
+                      DropdownMenuItem(value: a.id, child: Text(a.name, overflow: TextOverflow.ellipsis))).toList(),
+                    onChanged: (v) => setState(() => _albaId = v ?? ''),
+                    decoration: const InputDecoration(
+                      hintText: '매장 선택',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 28, height: 28,
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: 24, height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _albaColor,
+                        border: Border.all(color: theme.colorScheme.outline),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
 
-          // 묶음 리스트 (없으면 버튼만 보이게)
-          ...List.generate(_groups.length, (i) {
-            final g = _groups[i];
-            final borderColor = _albaColor(g.albaId);
-            final timePreview =
-                '${cp.fmtAmPm(g.startH, g.startM)} ~ ${cp.fmtAmPm(g.endH, g.endM)}'
-                '${((g.endH * 60 + g.endM) <= (g.startH * 60 + g.startM)) ? " (다음날)" : ""}';
+          _Card(
+            title: '어떤 근무인가요?',
+            trailing: TextButton(onPressed: _openPolicySheet, child: const Text('정책 설정')),
+            child: Wrap(
+              spacing: 8, runSpacing: 8,
+              children: [
+                _segButton('기본', _workType == _WorkType.basic, () => setState(() => _workType = _WorkType.basic)),
+                _segButton('대타', _WorkType.substitute == _WorkType.substitute && _workType == _WorkType.substitute,
+                    () => setState(() => _workType = _WorkType.substitute)),
+                _segButton('야간', _workType == _WorkType.night, () => setState(() => _workType = _WorkType.night)),
+                _segButton('연장', _workType == _WorkType.overtime, () => setState(() => _workType = _WorkType.overtime)),
+                _segButton('휴일', _workType == _WorkType.holiday, () => setState(() => _workType = _WorkType.holiday)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: borderColor, width: 1.5),
-                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.25),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: Column(
-                  children: [
-                    // 카드 헤더(우측 삭제)
-                    Row(
-                      children: [
-                        Text(
-                          g.existingScheduleId == null ? '신규 근무' : '기존 근무 수정',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () => _removeGroupAt(i),
-                          child: const Text('삭제'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // 알바 선택
-                    DropdownButtonFormField<String>(
-                      value: g.albaId.isEmpty ? null : g.albaId,
-                      items: widget.albas
-                          .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
-                          .toList(),
-                      onChanged: (v) => setState(() => g.albaId = v ?? ''),
-                      decoration: const InputDecoration(labelText: '알바 선택'),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // 근무 날짜
-                    Row(
-                      children: [
-                        Text('근무 날짜', style: Theme.of(context).textTheme.titleMedium),
-                        const Spacer(),
-                        TextButton(onPressed: () => _openDateAssignFor(i), child: const Text('날짜 선택')),
-                      ],
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '선택: ${_datesLabel(g.selectedUtcDates)}',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // 근무 시간
-                    Row(
-                      children: [
-                        Text('근무시간', style: Theme.of(context).textTheme.titleMedium),
-                        const Spacer(),
-                        TextButton(onPressed: () => _openTimePickerFor(i), child: const Text('시간 선택')),
-                      ],
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '선택: $timePreview',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // 휴게시간
-                    Row(
-                      children: [
-                        Text('휴게시간', style: Theme.of(context).textTheme.titleMedium),
-                        const Spacer(),
-                        TextButton(onPressed: () => _openBreakPickerFor(i), child: const Text('설정')),
-                      ],
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '선택: ${g.breakMin}분',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ],
+          _Card(
+            title: '근무 설정',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Line(
+                  label: '근무시간',
+                  value: timeRange,
+                  action: TextButton(onPressed: _pickTimeCupertino, child: const Text('시간 선택')),
                 ),
-              ),
-            );
-          }),
-
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ],
+                const SizedBox(height: 8),
+                _Line(
+                  label: '근무 날짜',
+                  value: _selectedUtcDates.isEmpty
+                      ? '없음'
+                      : (_selectedUtcDates.length == 1 ? _ymd(_selectedUtcDates.first) : '${_selectedUtcDates.length}일'),
+                  action: TextButton(onPressed: _pickDates, child: const Text('달력 열기')),
+                ),
+                const SizedBox(height: 8),
+                _Line(
+                  label: '휴게시간',
+                  value: '${_breakMin}분',
+                  action: TextButton(onPressed: _pickBreak, child: const Text('설정')),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
+
+  /* ───────── 작은 위젯들 ───────── */
+
+  Widget _segButton(String text, bool selected, VoidCallback onTap) =>
+      ChoiceChip(label: Text(text), selected: selected, onSelected: (_) => onTap(), showCheckmark: false);
+
+  WorkType _mapWorkType(_WorkType t) {
+    switch (t) {
+      case _WorkType.substitute: return WorkType.substitute;
+      case _WorkType.night: return WorkType.night;
+      case _WorkType.overtime: return WorkType.overtime;
+      case _WorkType.holiday: return WorkType.holiday;
+      case _WorkType.weekly: return WorkType.basic;
+      case _WorkType.basic: default: return WorkType.basic;
+    }
+  }
+
+  _WorkType _mapBackToWorkType(WorkType t) {
+    switch (t) {
+      case WorkType.substitute: return _WorkType.substitute;
+      case WorkType.night: return _WorkType.night;
+      case WorkType.overtime: return _WorkType.overtime;
+      case WorkType.holiday: return _WorkType.holiday;
+      case WorkType.basic: default: return _WorkType.basic;
+    }
+  }
+}
+
+/* ───────── 공용 카드/라인 ───────── */
+
+class _Card extends StatelessWidget {
+  const _Card({required this.title, this.trailing, required this.child});
+  final String title;
+  final Widget? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Text(title, style: theme.textTheme.titleMedium),
+              const Spacer(),
+              if (trailing != null) trailing!,
+            ],
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _Line extends StatelessWidget {
+  const _Line({required this.label, required this.value, required this.action});
+  final String label;
+  final String value;
+  final Widget action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            '$label: $value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        action,
+      ],
+    );
+  }
+}
+
+/* ───────── 유틸 ───────── */
+
+String _trimPct(num v) {
+  if (v is int) return v.toString();
+  final s = v.toString();
+  return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
 }

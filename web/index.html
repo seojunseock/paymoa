@@ -1,38 +1,81 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Paycount Web">
+  <title>paycount</title>
 
-  <!-- iOS meta tags & icons -->
+  <!-- PWA/아이콘 -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="paycount">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>paycount</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- ✅ 휴대폰 해상도 고정(예: iPhone 12 = 390x844). 브라우저 줌/확대 비활성화 -->
+  <meta name="viewport" content="width=390, height=844, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <style>
+    /* 고정 해상도 변수 */
+    :root { --app-w: 390px; --app-h: 844px; }
+
+    /* 전체 페이지를 가운데 배치 */
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #2b2f3a;           /* 바깥 배경(회색/검정 아무거나) */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* 폰 프레임(시각적) */
+    .phone-frame {
+      width: calc(var(--app-w) + 24px);
+      height: calc(var(--app-h) + 24px);
+      padding: 12px;
+      border-radius: 28px;
+      background: #111;
+      box-shadow: 0 24px 80px rgba(0,0,0,.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 실제 Flutter가 그릴 영역 고정 */
+    .app-fixed {
+      width: var(--app-w);
+      height: var(--app-h);
+      background: #f7f7fb;           /* 앱 바탕색(원하는 색으로) */
+      border-radius: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Flutter Web 엔진이 쓰는 레이어 강제 사이즈 고정 */
+    /* CanvasKit 엔진(기본) */
+    #flt-glass-pane, flt-glass-pane {
+      width: var(--app-w) !important;
+      height: var(--app-h) !important;
+    }
+    /* HTML 렌더러 경로 대비 */
+    #flutter_container, .flt-glass-pane {
+      width: var(--app-w) !important;
+      height: var(--app-h) !important;
+    }
+  </style>
 </head>
 <body>
+  <!-- 가운데에 폰 프레임 + 고정 앱 영역 -->
+  <div class="phone-frame">
+    <div class="app-fixed" id="app-host"></div>
+  </div>
+
+  <!-- Flutter 부트스트랩 -->
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

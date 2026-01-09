@@ -35,7 +35,11 @@ class AlbaFormScreen extends StatefulWidget {
 class _AlbaFormScreenState extends State<AlbaFormScreen> {
   // 입력 상태
   final _name = TextEditingController();
-  final _wage = TextEditingController(text: '0'); // 기본 0원
+
+  /// 시급 입력: 선행 0 제거 + 천단위 콤마 자동
+  final _wage = TextEditingController(text: '');
+  final _wageFocus = FocusNode();
+  bool _formattingWage = false;
 
   String _colorHex = '#3B82F6';
   pol.TaxConfig _tax = pol.TaxConfig.none;
@@ -60,10 +64,26 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   @override
   void initState() {
     super.initState();
+
+    // 시급 입력 포맷팅 리스너
+    _wage.addListener(() {
+      if (_formattingWage) return;
+      final txt = _wage.text;
+      final formatted = _formatMoneyText(txt);
+      if (formatted != txt) {
+        _formattingWage = true;
+        _wage.value = TextEditingValue(
+          text: formatted,
+          selection: TextSelection.collapsed(offset: formatted.length),
+        );
+        _formattingWage = false;
+      }
+    });
+
     final i = widget.initial;
     if (i != null) {
       _name.text = i.storeName;
-      _wage.text = '${i.hourlyWage}';
+      _wage.text = _commaInt(i.hourlyWage); // 초기값도 콤마로 세팅(선행 0 없음)
       _colorHex = i.colorHex;
       _tax = i.tax;
       _ins = i.insurance;
@@ -94,6 +114,35 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   String _ymd(DateTime d) =>
       '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
 
+  /* ───────────────────── 금액 포맷터(시급) ───────────────────── */
+
+  String _commaInt(int n) {
+    final s = n.toString();
+    final b = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      b.write(s[i]);
+      final left = s.length - i - 1;
+      if (left > 0 && left % 3 == 0) b.write(',');
+    }
+    return b.toString();
+  }
+
+  /// 사용자가 입력한 문자열을 "선행 0 제거 + 천단위 콤마"로 변환
+  String _formatMoneyText(String raw) {
+    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    final noLeading = digits.replaceFirst(RegExp(r'^0+'), '');
+    if (noLeading.isEmpty) return '';
+    final v = int.tryParse(noLeading) ?? 0;
+    return _commaInt(v);
+  }
+
+  /// 콤마 제거 후 정수 파싱
+  int _parseMoney(String raw) {
+    final clean = raw.replaceAll(',', '').trim();
+    if (clean.isEmpty) return 0;
+    return int.tryParse(clean) ?? 0;
+  }
+
   /* ───────────────────── 충돌 점검 ───────────────────── */
 
   // 저장/달력 체크 시: 수정 모드라면 "이미 있던 날짜"는 충돌 제외
@@ -113,6 +162,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60;
         var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60;
         if (b <= a) b += 24 * 60; // 오버나이트 보정
+        // 반열림 [a,b), [sMin0,eMin0) 충돌
         if (sMin0 < b && a < eMin0) return true;
       }
       return false;
@@ -330,10 +380,32 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('매장명을 입력하세요.')));
       return;
     }
-    final newWage = int.tryParse(_wage.text.trim()) ?? 0;
+
+    final newWage = _parseMoney(_wage.text); // 콤마 제거 후 파싱
     if (newWage < 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('시급을 확인하세요.')));
       return;
+    }
+
+    // ✅ 최종 저장 직전, 어떤 순서로 입력했더라도 전역 충돌 다시 검사
+    final conflicts = <DateTime>[];
+    for (final utc in _selected) {
+      if (!_shouldCheckDate(utc)) continue; // 수정모드에서 기존 날짜는 제외
+      final local = DateTime(utc.year, utc.month, utc.day);
+      if (_hasConflictOn(local)) conflicts.add(local);
+    }
+    if (conflicts.isNotEmpty) {
+      conflicts.sort((a, b) => a.compareTo(b));
+      final msg = conflicts.map(_ymd).join(', ');
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('겹치는 알바가 있습니다'),
+          content: Text('$msg 에 같은 시간대의 다른 근무가 있어 저장할 수 없어요.\n시간을 조정한 뒤 다시 시도해 주세요.'),
+          actions: [ TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인')) ],
+        ),
+      );
+      return; // 저장 차단
     }
 
     DateTime? effectiveFrom;
@@ -349,7 +421,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         hourlyWage: newWage,
         colorHex: _colorHex,
         tax: _tax,
-        insurance: _ins,
+        ins: _ins, // ← 필드명 통일: insurance → ins
         surcharge: _surcharge,
         startHour24: _startH,
         startMinute: _startM,
@@ -391,9 +463,16 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _wage,
+                  focusNode: _wageFocus,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly], // ← const 금지
-                  decoration: const InputDecoration(labelText: '시급(원)'),
+                  inputFormatters: [
+                    // 사용자가 입력할 때는 숫자만 허용, 콤마는 코드가 자동 삽입
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: '시급(원)',
+                    hintText: '예: 10,030',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 InkWell(
@@ -967,7 +1046,7 @@ class AlbaFormResult {
   final String storeName;
   final int hourlyWage;
   final pol.TaxConfig tax;
-  final pol.InsuranceConfig insurance;
+  final pol.InsuranceConfig ins; // ← 필드명 통일(insurance → ins)
   final pol.SurchargePolicy? surcharge;
   final int startHour24;
   final int startMinute;
@@ -985,7 +1064,7 @@ class AlbaFormResult {
     required this.storeName,
     required this.hourlyWage,
     required this.tax,
-    required this.insurance,
+    required this.ins,
     required this.surcharge,
     required this.startHour24,
     required this.startMinute,

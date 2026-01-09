@@ -1,38 +1,65 @@
-// lib/main.dart
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'ui/app_shell.dart';
+import 'package:intl/date_symbol_data_local.dart'; // ✅ 추가
 
-// 🔔 시스템 알림 엔진 초기화/사용
-import 'notifications/notification_planner.dart';
+import 'ui/app_shell.dart';
+// 알림 초기화는 일단 비활성(문제 분리용)
+// import 'notifications/notification_planner.dart';
+
+final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) 로컬 알림 엔진 초기화(채널 생성, 타임존 세팅, iOS 권한 요청)
-  await NotificationPlanner.instance.initialize();
+  // ✅ 한국어 날짜 포맷 초기화
+  await initializeDateFormatting('ko_KR', null);
 
-  // (선택) 초기 안내 알림 – 권한 허용 후 상단바 표시 테스트용
-  // await NotificationPlanner.instance.showNow(
-  //   title: 'PayCount',
-  //   body: '알림이 정상 수신됩니다.',
-  // );
+  // 모든 Flutter 에러를 콘솔+UI로 노출 (앱 종료 방지)
+  FlutterError.onError = (details) {
+    FlutterError.dumpErrorToConsole(details);
+    _showFatal('FlutterError', details.exceptionAsString(), details.stack);
+  };
 
-  runApp(const PayCountApp());
+  runZonedGuarded(() async {
+    runApp(const _SafeBootApp());
+
+    // ⚠️ 알림 초기화는 잠시 중단 (원인 분리)
+    // if (!kIsWeb) {
+    //   try { await NotificationPlanner.instance.initialize(); } catch (e, st) {
+    //     _showFatal('Notification init failed', '$e', st);
+    //   }
+    // }
+
+    // 앱이 안정적으로 뜬 뒤 AppShell로 진입
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      try {
+        _navKey.currentState?.pushReplacement(
+          MaterialPageRoute(builder: (_) => const AppShell()),
+        );
+      } catch (e, st) {
+        _showFatal('AppShell navigation failed', '$e', st);
+      }
+    });
+  }, (error, stack) {
+    _showFatal('Zoned error', '$error', stack);
+  });
 }
 
-class PayCountApp extends StatelessWidget {
-  const PayCountApp({super.key});
+class _SafeBootApp extends StatelessWidget {
+  const _SafeBootApp();
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PayCount',
+      navigatorKey: _navKey,
+      title: 'PayCount (Safe Boot)',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3B82F6)),
         useMaterial3: true,
       ),
-      // 전 화면 글자 살짝 키우기(가독성)
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         final scaled = (mq.textScaleFactor * 1.12).clamp(1.0, 1.4);
@@ -41,7 +68,57 @@ class PayCountApp extends StatelessWidget {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: const AppShell(),
+      home: const _BootScreen(),
     );
+  }
+}
+
+class _BootScreen extends StatelessWidget {
+  const _BootScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('PayCount — 안전 부팅')),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('초기화 중… 예외가 발생하면 다이얼로그로 표시됩니다.'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showFatal(String title, String message, StackTrace? st) {
+  final body = '$message\n${st ?? ''}';
+  debugPrint('[$title] $body');
+
+  // 앱이 올라와 있으면 UI로도 알림
+  final ctx = _navKey.currentContext;
+  if (ctx != null) {
+    final messenger = ScaffoldMessenger.maybeOf(ctx);
+    messenger?.showSnackBar(
+      SnackBar(content: Text('$title: $message'), duration: const Duration(seconds: 4)),
+    );
+    // 이미 다이얼로그가 떠 있을 수 있으니 안전하게 Future로 큐에 올림
+    Future.microtask(() {
+      final c = _navKey.currentContext;
+      if (c == null) return;
+      showDialog(
+        context: c,
+        builder: (_) => AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(child: Text(body)),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(c).pop(), child: const Text('확인')),
+          ],
+        ),
+      );
+    });
   }
 }

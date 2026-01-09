@@ -8,6 +8,7 @@ class MonthlySummary {
   const MonthlySummary({required this.gross, required this.net});
 }
 
+/// ───────────────────────────── 월 단위 합계 ─────────────────────────────
 /// “하우머치” 수준의 간단 합계:
 /// - 폼에서 설정한 가산정책(주휴/연장/휴일/야간)을 반영
 /// - 세금/보험은 간이 비율
@@ -48,50 +49,20 @@ MonthlySummary computeMonthlySummary({
 
   // ----- 스케줄 단위 기본/가산 계산 -----
   for (final s in monthSchedules) {
-    // 스케줄 시작/끝 (로컬)
+    final pay = computeSinglePay(
+      alba: alba,
+      s: s,
+      policy: policy,
+      wageAt: wageAt,
+    );
+    gross += pay;
+
+    // 주(월~일) 집계(주휴 판단용)
     final start = DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
     var end = DateTime(s.year, s.month, s.day, s.endHour, s.endMinute);
-    if (!end.isAfter(start)) end = end.add(const Duration(days: 1)); // 오버나이트
-
-    // 날짜별 시급 (없으면 기본 시급)
-    final baseWage = wageAt?.call(alba.id, DateTime(s.year, s.month, s.day))
-        ?? alba.hourlyWage;
-
-    final totalMin = end.difference(start).inMinutes;
-    final workedMin = max(0, totalMin - s.breakMinutes);
-
-    // 기본 임금
-    final basePay = (baseWage * workedMin / 60).round();
-
-    // 연장(8시간 초과) 분
-    int overtimeMin = 0;
-    if (policy.overtimeEnabled) {
-      overtimeMin = max(0, workedMin - 8 * 60);
-    }
-
-    // 야간(22:00~06:00) 겹치는 분
-    int nightMin = 0;
-    if (policy.nightEnabled) {
-      nightMin = _overlapMinutesWithNight(start, end);
-    }
-
-    // 휴일(일요일) 겹치는 분
-    int holidayMin = 0;
-    if (policy.holidayEnabled) {
-      holidayMin = _overlapMinutesWithSunday(start, end);
-    }
-
-    // 가산 임금들
-    final overtimePay =
-        (baseWage * (policy.overtimePercent / 100.0) * overtimeMin / 60).round();
-    final nightPay =
-        (baseWage * (policy.nightPercent / 100.0) * nightMin / 60).round();
-    final holidayPay =
-        (baseWage * (policy.holidayPercent / 100.0) * holidayMin / 60).round();
-
-    gross += basePay + overtimePay + nightPay + holidayPay;
-
-    // 주(월~일) 집계(주휴 판단)
+    if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
+    final workedMin =
+        end.difference(start).inMinutes - s.breakMinutes.clamp(0, 1440);
     final weekStart = _mondayOf(start);
     weeklyMinutes[weekStart] = (weeklyMinutes[weekStart] ?? 0) + workedMin;
   }
@@ -100,8 +71,6 @@ MonthlySummary computeMonthlySummary({
   if (policy.weeklyHolidayEnabled) {
     weeklyMinutes.forEach((weekStart, mins) {
       if (mins >= 15 * 60) {
-        // 주휴도 날짜별 시급을 쓰려면 그 주의 평균 시급 등이 필요하지만,
-        // 하우머치 목적이라 기본 시급 or 그 주 첫날 시급으로 단순화.
         final refDate = weekStart;
         final refWage = wageAt?.call(alba.id, refDate) ?? alba.hourlyWage;
         gross += (refWage * 8); // 8시간 × 시급
@@ -123,19 +92,70 @@ MonthlySummary computeMonthlySummary({
   return MonthlySummary(gross: gross, net: net);
 }
 
+/// ───────────────────────────── 단일 스케줄 급여 ─────────────────────────────
+/// 한 스케줄에 대해서만 기본급 + 연장 + 야간 + 휴일 수당을 계산
+/// - “근무 수정 화면”에서 당일 급여 표시용
+int computeSinglePay({
+  required UICalendarAlba alba,
+  required UICalendarSchedule s,
+  required SurchargePolicy policy,
+
+  /// (선택) 날짜별 시급 조회
+  int Function(String albaId, DateTime dateLocal)? wageAt,
+}) {
+  // 스케줄 시작/끝 (로컬)
+  final start = DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
+  var end = DateTime(s.year, s.month, s.day, s.endHour, s.endMinute);
+  if (!end.isAfter(start)) end = end.add(const Duration(days: 1)); // 오버나이트
+
+  final baseWage =
+      wageAt?.call(alba.id, DateTime(s.year, s.month, s.day)) ?? alba.hourlyWage;
+
+  final totalMin = end.difference(start).inMinutes;
+  final workedMin = max(0, totalMin - s.breakMinutes);
+
+  // 기본 임금
+  final basePay = (baseWage * workedMin / 60).round();
+
+  int overtimePay = 0, nightPay = 0, holidayPay = 0;
+
+  // 연장
+  if (policy.overtimeEnabled) {
+    final overtimeMin = max(0, workedMin - 8 * 60);
+    overtimePay =
+        (baseWage * (policy.overtimePercent / 100.0) * overtimeMin / 60).round();
+  }
+
+  // 야간
+  if (policy.nightEnabled) {
+    final nightMin = _overlapMinutesWithNight(start, end);
+    nightPay =
+        (baseWage * (policy.nightPercent / 100.0) * nightMin / 60).round();
+  }
+
+  // 휴일
+  if (policy.holidayEnabled) {
+    final holidayMin = _overlapMinutesWithSunday(start, end);
+    holidayPay =
+        (baseWage * (policy.holidayPercent / 100.0) * holidayMin / 60).round();
+  }
+
+  return basePay + overtimePay + nightPay + holidayPay;
+}
+
 /// 스케줄 [start, end) 와 야간 구간(매일 22:00~24:00, 다음날 00:00~06:00)의 겹치는 분
 int _overlapMinutesWithNight(DateTime start, DateTime end) {
   int sum = 0;
 
   // 당일 22~24
   final nightStart1 = DateTime(start.year, start.month, start.day, 22, 0);
-  final nightEnd1   = DateTime(start.year, start.month, start.day, 24, 0);
+  final nightEnd1 = DateTime(start.year, start.month, start.day, 24, 0);
   sum += _overlapMinutes(start, end, nightStart1, nightEnd1);
 
   // 다음날 00~06
   final next = DateTime(start.year, start.month, start.day).add(const Duration(days: 1));
   final nightStart2 = DateTime(next.year, next.month, next.day, 0, 0);
-  final nightEnd2   = DateTime(next.year, next.month, next.day, 6, 0);
+  final nightEnd2 = DateTime(next.year, next.month, next.day, 6, 0);
   sum += _overlapMinutes(start, end, nightStart2, nightEnd2);
 
   return sum;
@@ -173,6 +193,5 @@ int _overlapMinutes(
 /// 해당 날짜가 속한 주의 “월요일 00:00”
 DateTime _mondayOf(DateTime d) {
   // DateTime.weekday: Mon=1 ... Sun=7
-  return DateTime(d.year, d.month, d.day)
-      .subtract(Duration(days: d.weekday - 1));
+  return DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
 }

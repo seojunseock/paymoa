@@ -1,14 +1,11 @@
-// lib/screens/my_info_screen.dart
 import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import '../data/stats_repository.dart';
-import '../data/alarm_settings_repository.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
-import '../notifications/notification_planner.dart';
 
 class MyInfoScreen extends StatefulWidget {
   const MyInfoScreen({
@@ -21,7 +18,6 @@ class MyInfoScreen extends StatefulWidget {
     required this.policyOf,
     this.userAge,
     required this.payDay,
-    this.onEditProfile,
     this.onLogout,
     this.onDeleteAccount,
     this.onOpenTerms,
@@ -40,7 +36,7 @@ class MyInfoScreen extends StatefulWidget {
   final int? userAge;
   final int payDay;
 
-  final VoidCallback? onEditProfile;
+  // 남기는 콜백: 약관/개인정보/FAQ/문의/로그아웃/탈퇴
   final VoidCallback? onLogout;
   final VoidCallback? onDeleteAccount;
   final VoidCallback? onOpenTerms;
@@ -55,14 +51,6 @@ class MyInfoScreen extends StatefulWidget {
 class _MyInfoScreenState extends State<MyInfoScreen> {
   final StatsRepository _stats = const StatsRepository();
 
-  bool _workStartAlarm = false;
-  bool _workEndAlarm = false;
-  bool _paydayAlarm = false;
-
-  int _startLeadMin = 10;
-  int _endLeadMin = 10;
-  int _paydayLeadDays = 0;
-
   int _monthlyGoal = 1000000;
   DateTime? _lastRefreshedAt = DateTime.now().subtract(const Duration(days: 10));
 
@@ -71,50 +59,25 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
 
   int? _age;
 
-  final AlarmSettingsRepository _alarmRepo = const AlarmSettingsRepository();
-  bool _loadedAlarmSettings = false;
-
   @override
   void initState() {
     super.initState();
     _age = widget.userAge;
     _computeGraph();
-    _restoreAlarmSettings();
   }
 
-  Future<void> _restoreAlarmSettings() async {
-    final saved = await _alarmRepo.load();
-    if (!mounted) return;
-    setState(() {
-      _workStartAlarm = saved.workStartOn;
-      _workEndAlarm = saved.workEndOn;
-      _paydayAlarm = saved.paydayOn;
-      _startLeadMin = saved.startLeadMinutes;
-      _endLeadMin = saved.endLeadMinutes;
-      _paydayLeadDays = saved.paydayLeadDays;
-      _loadedAlarmSettings = true;
-    });
-  }
+  // 부모에서 알바/스케줄/급여일이 바뀌면 즉시 재계산
+  @override
+  void didUpdateWidget(covariant MyInfoScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final albasChanged = !identical(oldWidget.albas, widget.albas) ||
+        oldWidget.albas.length != widget.albas.length;
+    final schedulesChanged = !identical(oldWidget.schedules, widget.schedules) ||
+        oldWidget.schedules.length != widget.schedules.length;
+    final paydayChanged = oldWidget.payDay != widget.payDay;
 
-  Future<void> _applyAndPersistNotificationPlan() async {
-    final settings = AlarmSettings(
-      workStartOn: _workStartAlarm,
-      workEndOn: _workEndAlarm,
-      paydayOn: _paydayAlarm,
-      startLeadMinutes: _startLeadMin,
-      endLeadMinutes: _endLeadMin,
-      paydayLeadDays: _paydayLeadDays,
-    );
-    await _alarmRepo.save(settings);
-    await NotificationPlanner.instance.scheduleAll(
-      schedules: widget.schedules,
-      albas: widget.albas,
-      settings: settings,
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('알림 설정이 저장되고 적용되었습니다.')),
-      );
+    if (albasChanged || schedulesChanged || paydayChanged) {
+      _computeGraph();
     }
   }
 
@@ -168,18 +131,19 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             if (needRefresh) _buildRefreshBanner(now),
-            _buildGraphCard(),
-            const SizedBox(height: 16),
+            // 🔼 1) 목표 카드가 최상단
             _buildGoalCard(),
             const SizedBox(height: 16),
-            _buildAlarmCard(),
+            // 🔽 2) 그래프 카드
+            _buildGraphCard(),
             const SizedBox(height: 16),
-            _buildAccountCard(),
-            const SizedBox(height: 16),
+            // 3) 정책(약관/개인정보/오픈소스)
             _buildPolicyCard(),
             const SizedBox(height: 16),
+            // 4) FAQ & 고객센터
             _buildFaqSupportCard(),
             const SizedBox(height: 16),
+            // 5) 위험영역: 로그아웃/회원탈퇴
             _buildDangerZoneCard(),
           ],
         ),
@@ -254,6 +218,10 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
               height: 36,
               child: Row(
                 children: [
+                  const Text(
+                    '수입 그래프',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const Spacer(),
                   if (_age == null)
                     TextButton.icon(
@@ -293,7 +261,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                       barGroups: groups,
                       gridData: FlGridData(show: true, drawHorizontalLine: true),
                       borderData: FlBorderData(show: false),
-
                       titlesData: FlTitlesData(
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
@@ -353,7 +320,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                           bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                         ),
                         borderData: FlBorderData(show: false),
-
                       ),
                     ),
                 ],
@@ -366,6 +332,10 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                   _legendDot(Colors.blue),
                   const SizedBox(width: 6),
                   const Text('내 나이 때 월급 평균'),
+                  const SizedBox(width: 16),
+                  _legendDot(Colors.green),
+                  const SizedBox(width: 6),
+                  const Text('나의 월 수입'),
                 ],
               ),
           ],
@@ -374,6 +344,8 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     );
   }
 
+  // ✅ 제목을 '목표'로 짧게, 설명 제거
+  // ✅ '현재/목표' 라인에서 '목표' 금액을 탭하면 금액 설정 다이얼로그 오픈
   Widget _buildGoalCard() {
     final progress = _monthlyGoal <= 0 ? 0.0 : (_currentMonthIncome / _monthlyGoal).clamp(0.0, 1.0);
     return Card(
@@ -382,7 +354,7 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _cardHeader(title: '이번 달 목표', subtitle: '월 목표 금액을 설정하고 진행률을 확인하세요'),
+            const Text('목표', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -396,170 +368,33 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    '현재: ${_fmtMoney(_currentMonthIncome)} / 목표: ${_fmtMoney(_monthlyGoal)}',
+                    '현재: ${_fmtMoney(_currentMonthIncome)} / '
+                    '목표: ',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
-                TextButton(
-                  onPressed: () async {
+                // 목표 금액 부분만 따로 터치 가능 영역으로
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () async {
                     final newGoal = await _openGoalDialog(context, _monthlyGoal);
                     if (newGoal != null) setState(() => _monthlyGoal = newGoal);
                   },
-                  child: const Text('목표 설정'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Text(
+                      _fmtMoney(_monthlyGoal),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildAlarmCard() {
-    if (!_loadedAlarmSettings) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: SizedBox(height: 88, child: Center(child: CircularProgressIndicator())),
-        ),
-      );
-    }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _cardHeader(title: '알림 설정'),
-
-            SwitchListTile(
-              title: const Text('출근 알림'),
-              subtitle: _workStartAlarm
-                  ? Text('근무 시작 $_startLeadMin분 전')
-                  : const Text('근무 시작 X분 전'),
-              value: _workStartAlarm,
-              onChanged: (v) async {
-                if (!v) {
-                  setState(() => _workStartAlarm = false);
-                  await _applyAndPersistNotificationPlan();
-                  return;
-                }
-                final picked = await _openBottomSheetPicker(
-                  title: '출근 알림 설정',
-                  unitLabel: '분 전',
-                  min: 1,
-                  max: 60,
-                  initial: _startLeadMin,
-                );
-                if (picked != null) {
-                  setState(() {
-                    _workStartAlarm = true;
-                    _startLeadMin = picked;
-                  });
-                  await _applyAndPersistNotificationPlan();
-                } else {
-                  setState(() => _workStartAlarm = false);
-                }
-              },
-            ),
-
-            SwitchListTile(
-              title: const Text('퇴근 알림'),
-              subtitle: _workEndAlarm
-                  ? Text('근무 종료 $_endLeadMin분 전')
-                  : const Text('근무 종료 X분 전'),
-              value: _workEndAlarm,
-              onChanged: (v) async {
-                if (!v) {
-                  setState(() => _workEndAlarm = false);
-                  await _applyAndPersistNotificationPlan();
-                  return;
-                }
-                final picked = await _openBottomSheetPicker(
-                  title: '퇴근 알림 설정',
-                  unitLabel: '분 전',
-                  min: 1,
-                  max: 60,
-                  initial: _endLeadMin,
-                );
-                if (picked != null) {
-                  setState(() {
-                    _workEndAlarm = true;
-                    _endLeadMin = picked;
-                  });
-                  await _applyAndPersistNotificationPlan();
-                } else {
-                  setState(() => _workEndAlarm = false);
-                }
-              },
-            ),
-
-            SwitchListTile(
-              title: Text('급여일 알림 (매월 ${widget.payDay}일)'),
-              subtitle: _paydayAlarm
-                  ? Text(_paydayLeadDays == 0 ? '당일 알림' : 'D-${_paydayLeadDays}일 전')
-                  : const Text('급여일 기준 D-N일 전'),
-              value: _paydayAlarm,
-              onChanged: (v) async {
-                if (!v) {
-                  setState(() => _paydayAlarm = false);
-                  await _applyAndPersistNotificationPlan();
-                  return;
-                }
-                final picked = await _openBottomSheetPicker(
-                  title: '급여일 알림 설정',
-                  unitLabel: '일 전',
-                  min: 0,
-                  max: 15,
-                  initial: _paydayLeadDays,
-                );
-                if (picked != null) {
-                  setState(() {
-                    _paydayAlarm = true;
-                    _paydayLeadDays = picked;
-                  });
-                  await _applyAndPersistNotificationPlan();
-                } else {
-                  setState(() => _paydayAlarm = false);
-                }
-              },
-            ),
-
-            const SizedBox(height: 4),
-            if (_workStartAlarm || _workEndAlarm || _paydayAlarm)
-              Text(
-                '예약 기준: 근무 시작/종료/급여일 + 오프셋\n'
-                '· 시작: $_startLeadMin분 전  · 종료: $_endLeadMin분 전  · 급여: D-${_paydayLeadDays}',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAccountCard() {
-    return Card(
-      child: Column(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('프로필 수정'),
-            onTap: widget.onEditProfile,
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.swap_horiz),
-            title: const Text('역할 전환 (사장님 ↔ 알바생)'),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('역할 전환 화면으로 이동합니다.')),
-              );
-            },
-            trailing: const Icon(Icons.chevron_right),
-          ),
-        ],
       ),
     );
   }
@@ -574,7 +409,7 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
             onTap: widget.onOpenTerms,
             trailing: const Icon(Icons.chevron_right),
           ),
-          const Divider(height: 1),
+            const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.privacy_tip),
             title: const Text('개인정보 처리방침'),
@@ -638,20 +473,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _cardHeader({required String title, String? subtitle}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        if (subtitle != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(subtitle, style: TextStyle(color: Colors.grey.shade600)),
-          ),
-      ],
     );
   }
 
@@ -731,68 +552,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
       ),
     );
     return result;
-  }
-
-  Future<int?> _openBottomSheetPicker({
-    required String title,
-    required String unitLabel,
-    required int min,
-    required int max,
-    required int initial,
-  }) async {
-    int temp = initial.clamp(min, max);
-    int idx = temp - min;
-
-    return showModalBottomSheet<int>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    CupertinoButton(
-                      child: const Text('취소'),
-                      onPressed: () => Navigator.pop(ctx, null),
-                    ),
-                    const Spacer(),
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const Spacer(),
-                    CupertinoButton(
-                      child: const Text('적용'),
-                      onPressed: () => Navigator.pop(ctx, temp),
-                    ),
-                  ],
-                ),
-                SizedBox(
-                  height: 180,
-                  child: CupertinoPicker(
-                    scrollController: FixedExtentScrollController(initialItem: idx),
-                    itemExtent: 40,
-                    onSelectedItemChanged: (i) {
-                      temp = min + i;
-                    },
-                    children: List.generate(
-                      max - min + 1,
-                      (i) => Center(child: Text('${min + i}$unitLabel')),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   String _fmtMoney(int v) {

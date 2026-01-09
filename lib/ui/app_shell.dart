@@ -1,4 +1,3 @@
-// lib/ui/app_shell.dart
 import 'package:flutter/material.dart';
 
 import '../data/in_memory_repository.dart';
@@ -52,7 +51,8 @@ class _AppShellState extends State<AppShell> {
     int bestCnt = 0;
     freq.forEach((day, cnt) {
       if (cnt > bestCnt || (cnt == bestCnt && day < bestDay)) {
-        bestDay = day; bestCnt = cnt;
+        bestDay = day;
+        bestCnt = cnt;
       }
     });
     return bestDay;
@@ -63,7 +63,6 @@ class _AppShellState extends State<AppShell> {
       schedules: repo.schedules,
       payDay: _preferredPayDay(repo.albas),
       settings: const AlarmSettings(
-        // 기본값(내 정보 화면에서 다시 설정하면 거기가 우선)
         workStartOn: true,
         workEndOn: true,
         paydayOn: true,
@@ -85,15 +84,26 @@ class _AppShellState extends State<AppShell> {
         getSurchargePolicy: (id) => repo.policyOf(id),
         onAdd: (s) async {
           setState(() => repo.addSchedule(s));
-          await _rescheduleNotifications(); // 근무 추가 → 리스케줄
+          await _rescheduleNotifications();
         },
         onUpdate: (s) async {
           setState(() => repo.updateSchedule(s));
-          await _rescheduleNotifications(); // 근무 수정 → 리스케줄
+          await _rescheduleNotifications();
         },
         onDelete: (id) async {
           setState(() => repo.deleteSchedule(id));
-          await _rescheduleNotifications(); // 근무 삭제 → 리스케줄
+          await _rescheduleNotifications();
+        },
+        // ✅ WorkEditorScreen에서 정책 저장 시 repo에도 반영
+        onUpdatePolicy: (albaId, res) {
+          setState(() {
+            repo.setPolicies(
+              albaId: albaId,
+              tax: res.tax,
+              insurance: res.ins,
+              surcharge: res.surcharge,
+            );
+          });
         },
         onBack: () => Navigator.of(context).pop(),
       ),
@@ -121,7 +131,7 @@ class _AppShellState extends State<AppShell> {
             repo.setPolicies(
               albaId: saved.id,
               tax: res.tax,
-              insurance: res.insurance,
+              insurance: res.ins,
               surcharge: res.surcharge,
             );
 
@@ -150,11 +160,10 @@ class _AppShellState extends State<AppShell> {
             ];
           });
 
-          // 알바/스케줄 추가되었으니 알림 리스케줄
           await _rescheduleNotifications();
 
           Navigator.of(context).pop();
-          setState(() => _tab = 1); // 달력으로
+          setState(() => _tab = 1); // ✅ 신규 등록 후 달력으로 이동
         },
       ),
     );
@@ -188,8 +197,8 @@ class _AppShellState extends State<AppShell> {
     final sur = repo.policyOf(alba.id);
 
     final my = repo.schedules.where((s) => s.albaId == alba.id).toList()
-      ..sort((a, b) =>
-          DateTime(b.year, b.month, b.day).compareTo(DateTime(a.year, a.month, a.day)));
+      ..sort((a, b) => DateTime(b.year, b.month, b.day)
+          .compareTo(DateTime(a.year, a.month, a.day)));
 
     int sh = 9, sm = 0, eh = 18, em = 0, br = 0;
     if (my.isNotEmpty) {
@@ -199,7 +208,8 @@ class _AppShellState extends State<AppShell> {
       em = my.first.endMinute;
       br = my.first.breakMinutes;
     }
-    final selected = my.map((s) => DateTime.utc(s.year, s.month, s.day)).toSet();
+    final selected =
+        my.map((s) => DateTime.utc(s.year, s.month, s.day)).toSet();
 
     return AlbaFormInitial(
       storeName: alba.name,
@@ -244,7 +254,8 @@ class _AppShellState extends State<AppShell> {
     if (bands == null || bands.isEmpty) {
       final a = repo.albas.firstWhere(
         (x) => x.id == albaId,
-        orElse: () => UICalendarAlba(id: '', name: '', colorHex: '#3B82F6', hourlyWage: 0, payDay: 25),
+        orElse: () => UICalendarAlba(
+            id: '', name: '', colorHex: '#3B82F6', hourlyWage: 0, payDay: 25),
       );
       return a.hourlyWage;
     }
@@ -257,7 +268,8 @@ class _AppShellState extends State<AppShell> {
         break;
       }
     }
-    return last?.wage ?? repo.albas.firstWhere((x) => x.id == albaId).hourlyWage;
+    return last?.wage ??
+        repo.albas.firstWhere((x) => x.id == albaId).hourlyWage;
   }
 
   void _openAlbaFormEdit(UICalendarAlba alba) {
@@ -287,7 +299,7 @@ class _AppShellState extends State<AppShell> {
             repo.setPolicies(
               albaId: alba.id,
               tax: res.tax,
-              insurance: res.insurance,
+              insurance: res.ins,
               surcharge: res.surcharge,
             );
 
@@ -329,13 +341,25 @@ class _AppShellState extends State<AppShell> {
             }
           });
 
-          // 알바 정보(특히 payDay)나 스케줄이 바뀌었으므로 알림 리스케줄
           await _rescheduleNotifications();
 
           Navigator.of(context).pop();
+          setState(() => _tab = 1); // ✅ 수정 완료 후 달력 탭으로 이동
         },
       ),
     );
+  }
+
+  // ---------------- 알바 삭제(전체) ----------------
+  Future<void> _deleteAlbaCompletely(String albaId) async {
+    setState(() {
+      repo.albas.removeWhere((a) => a.id == albaId);
+      repo.schedules.removeWhere((s) => s.albaId == albaId);
+      _albaDefaults.remove(albaId);
+      _wageBands.remove(albaId);
+      // 정책 맵이 repo 내부에 남아 있어도 앱 동작에는 영향 없음.
+    });
+    await _rescheduleNotifications();
   }
 
   Widget _buildHome() {
@@ -349,6 +373,15 @@ class _AppShellState extends State<AppShell> {
         _openAlbaFormEdit(target);
       },
       onOpenWorkEditor: _openWorkEditor,
+      // ✅ 바텀시트의 스케줄 삭제
+      onDeleteSchedule: (id) async {
+        setState(() => repo.deleteSchedule(id));
+        await _rescheduleNotifications();
+      },
+      // ✅ 홈 카드 펼침영역의 “알바 삭제”
+      onDeleteAlba: (albaId) async {
+        await _deleteAlbaCompletely(albaId);
+      },
       getTaxPolicy: (id) => repo.taxOf(id),
       getInsurancePolicy: (id) => repo.insuranceOf(id),
       getSurchargePolicy: (id) => repo.policyOf(id),
@@ -362,18 +395,20 @@ class _AppShellState extends State<AppShell> {
       schedules: repo.schedules,
       onDeleteSchedule: (id) async {
         setState(() => repo.deleteSchedule(id));
-        await _rescheduleNotifications(); // 삭제 → 리스케줄
+        await _rescheduleNotifications();
       },
       getTaxPolicy: (id) => repo.taxOf(id) ?? pol.TaxConfig.none,
-      getInsurancePolicy: (id) => repo.insuranceOf(id) ?? const pol.InsuranceNone(),
-      getSurchargePolicy: (id) => repo.policyOf(id) ?? const pol.SurchargePolicy(),
+      getInsurancePolicy: (id) =>
+          repo.insuranceOf(id) ?? const pol.InsuranceNone(),
+      getSurchargePolicy: (id) =>
+          repo.policyOf(id) ?? const pol.SurchargePolicy(),
       openWorkEditor: _openWorkEditor,
-      // ★ 월합계 계산 시 날짜별 시급 사용
       wageAt: wageAt,
     );
   }
 
   Widget _buildProfile() {
+    // ✅ MyInfoScreen 최신 시그니처에 맞춰 콜백 전달 (프로필/역할 전환 제거됨)
     return MyInfoScreen(
       albas: repo.albas,
       schedules: repo.schedules,
@@ -382,15 +417,72 @@ class _AppShellState extends State<AppShell> {
       insuranceOf: (id) => repo.insuranceOf(id) ?? const pol.InsuranceNone(),
       policyOf: (id) => repo.policyOf(id) ?? const pol.SurchargePolicy(),
       payDay: _preferredPayDay(repo.albas),
-      // 액션 핸들러(필요 시 라우팅 연결)
-      onEditProfile: () {},
-      onLogout: () {},
-      onDeleteAccount: () {},
-      onOpenTerms: () {},
-      onOpenPrivacy: () {},
-      onOpenFaq: () {},
-      onOpenSupport: () {},
+
+      // 정책 문서/FAQ/문의: 간단 페이지 or 스낵바로 연결
+      onOpenTerms: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('서비스 이용약관 화면으로 이동합니다.')),
+        );
+        // TODO: Navigator.push(context, MaterialPageRoute(builder: (_) => TermsScreen()));
+      },
+      onOpenPrivacy: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('개인정보 처리방침 화면으로 이동합니다.')),
+        );
+        // TODO: Navigator.push(context, MaterialPageRoute(builder: (_) => PrivacyScreen()));
+      },
+      onOpenFaq: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('FAQ 화면으로 이동합니다.')),
+        );
+        // TODO: Navigator.push(context, MaterialPageRoute(builder: (_) => FaqScreen()));
+      },
+      onOpenSupport: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('고객센터 문의로 이동합니다. (이메일/카카오/폼)')),
+        );
+        // TODO: Navigator.push(context, MaterialPageRoute(builder: (_) => SupportScreen()));
+      },
+
+      // 로그아웃/회원탈퇴: 확인 다이얼로그 후 후속 처리 (Firebase Auth 연동 예정)
+      onLogout: () async {
+        final ok = await _confirm(context, '로그아웃 하시겠어요?');
+        if (!ok) return;
+        // TODO: await FirebaseAuth.instance.signOut();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('로그아웃 되었습니다.')),
+          );
+        }
+      },
+      onDeleteAccount: () async {
+        final ok = await _confirm(
+          context,
+          '회원탈퇴 하시겠어요?\n모든 데이터가 삭제될 수 있습니다.',
+        );
+        if (!ok) return;
+        // TODO: 재인증 후 delete(), Firestore 정리
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('회원탈퇴 요청이 처리되었습니다.')),
+          );
+        }
+      },
     );
+  }
+
+  Future<bool> _confirm(BuildContext context, String message) async {
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('확인')),
+        ],
+      ),
+    );
+    return r ?? false;
   }
 
   @override
@@ -408,7 +500,8 @@ class _AppShellState extends State<AppShell> {
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
-          NavigationDestination(icon: Icon(Icons.calendar_today_outlined), label: '달력'),
+          NavigationDestination(
+              icon: Icon(Icons.calendar_today_outlined), label: '달력'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: '내 정보'),
         ],
       ),
@@ -449,7 +542,7 @@ class _AlbaFormDefaults {
         colorHex: r.colorHex,
         hourlyWage: r.hourlyWage,
         tax: r.tax,
-        insurance: r.insurance,
+        insurance: r.ins,
         surcharge: r.surcharge,
         startHour24: r.startHour24,
         startMinute: r.startMinute,
