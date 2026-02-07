@@ -19,8 +19,8 @@ class AlarmSettingsRepository {
     workEndOn: false,
     paydayOn: false,
     startLeadMinutes: 10, // 1~60
-    endLeadMinutes: 10,   // 1~60
-    paydayLeadDays: 0,    // 0~15 (0=당일)
+    endLeadMinutes: 10, // 1~60
+    paydayLeadDays: 0, // 0~15 (0=당일)
   );
 
   const AlarmSettingsRepository();
@@ -50,7 +50,7 @@ class AlarmSettingsRepository {
       endLeadMinutes: endLeadClamped,
       paydayLeadDays: paydayLeadClamped,
     );
-    }
+  }
 
   /// "적용" 버튼을 눌렀을 때만 호출해서 디스크에 반영
   Future<void> save(AlarmSettings settings) async {

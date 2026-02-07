@@ -1,0 +1,1 @@
+enum PayrollViewerRole { owner, worker }

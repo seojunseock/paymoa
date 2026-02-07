@@ -3,6 +3,9 @@ import java.io.File
 
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -16,7 +19,10 @@ android {
 
     defaultConfig {
         applicationId = "com.paycount.app"
-        minSdk = flutter.minSdkVersion
+
+        // ✅ firebase_auth 때문에 최소 23 필요 (기존 flutter.minSdkVersion=21이라 에러남)
+        minSdk = 23
+
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

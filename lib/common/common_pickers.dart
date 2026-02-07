@@ -67,12 +67,16 @@ Future<void> showTimeSheet({
             child: StatefulBuilder(
               builder: (ctx, setState) {
                 void onStartChange(int ap, int h, int m) {
-                  sAp = ap; sH12 = h; sMin = m;
+                  sAp = ap;
+                  sH12 = h;
+                  sMin = m;
                   setState(() {});
                 }
 
                 void onEndChange(int ap, int h, int m) {
-                  eAp = ap; eH12 = h; eMin = m;
+                  eAp = ap;
+                  eH12 = h;
+                  eMin = m;
                   setState(() {});
                 }
 
@@ -91,7 +95,8 @@ Future<void> showTimeSheet({
                           child: const Text('취소'),
                         ),
                         const Spacer(),
-                        Text('근무시간', style: Theme.of(ctx).textTheme.titleMedium),
+                        Text('근무시간',
+                            style: Theme.of(ctx).textTheme.titleMedium),
                         const Spacer(),
                         TextButton(
                           onPressed: () {
@@ -111,10 +116,13 @@ Future<void> showTimeSheet({
                         Expanded(
                           child: Column(
                             children: [
-                              Text('시작', style: Theme.of(ctx).textTheme.labelLarge),
+                              Text('시작',
+                                  style: Theme.of(ctx).textTheme.labelLarge),
                               const SizedBox(height: 8),
                               _TimeSection12h(
-                                ap: sAp, h12: sH12, min: sMin,
+                                ap: sAp,
+                                h12: sH12,
+                                min: sMin,
                                 onChange: onStartChange,
                               ),
                             ],
@@ -131,10 +139,13 @@ Future<void> showTimeSheet({
                         Expanded(
                           child: Column(
                             children: [
-                              Text('종료', style: Theme.of(ctx).textTheme.labelLarge),
+                              Text('종료',
+                                  style: Theme.of(ctx).textTheme.labelLarge),
                               const SizedBox(height: 8),
                               _TimeSection12h(
-                                ap: eAp, h12: eH12, min: eMin,
+                                ap: eAp,
+                                h12: eH12,
+                                min: eMin,
                                 onChange: onEndChange,
                               ),
                             ],
@@ -185,9 +196,9 @@ class _TimeSection12h extends StatefulWidget {
     required this.onChange,
   });
 
-  final int ap;   // 0=오전, 1=오후
-  final int h12;  // 1..12
-  final int min;  // 0..59
+  final int ap; // 0=오전, 1=오후
+  final int h12; // 1..12
+  final int min; // 0..59
   final void Function(int ap, int h12, int m) onChange;
 
   @override
@@ -212,8 +223,8 @@ class _TimeSection12hState extends State<_TimeSection12h> {
     _h12 = widget.h12.clamp(1, 12);
     _m = widget.min.clamp(0, 59);
     _apCtrl = FixedExtentScrollController(initialItem: _ap);
-    _hCtrl  = FixedExtentScrollController(initialItem: _h12 - 1);
-    _mCtrl  = FixedExtentScrollController(initialItem: _m);
+    _hCtrl = FixedExtentScrollController(initialItem: _h12 - 1);
+    _mCtrl = FixedExtentScrollController(initialItem: _m);
   }
 
   @override
@@ -235,7 +246,10 @@ class _TimeSection12hState extends State<_TimeSection12h> {
           count: 2,
           initialIndex: _ap,
           display: (i) => i == 0 ? '오전' : '오후',
-          onChanged: (i) { setState(() => _ap = i); widget.onChange(_ap, _h12, _m); },
+          onChanged: (i) {
+            setState(() => _ap = i);
+            widget.onChange(_ap, _h12, _m);
+          },
         ),
         const SizedBox(width: 6),
         Expanded(
@@ -245,7 +259,10 @@ class _TimeSection12hState extends State<_TimeSection12h> {
             count: 12,
             initialIndex: _h12 - 1,
             display: (i) => (i + 1).toString().padLeft(2, '0'),
-            onChanged: (i) { setState(() => _h12 = i + 1); widget.onChange(_ap, _h12, _m); },
+            onChanged: (i) {
+              setState(() => _h12 = i + 1);
+              widget.onChange(_ap, _h12, _m);
+            },
           ),
         ),
         const SizedBox(width: 6),
@@ -256,7 +273,10 @@ class _TimeSection12hState extends State<_TimeSection12h> {
             count: 60,
             initialIndex: _m,
             display: (i) => i.toString().padLeft(2, '0'),
-            onChanged: (i) { setState(() => _m = i); widget.onChange(_ap, _h12, _m); },
+            onChanged: (i) {
+              setState(() => _m = i);
+              widget.onChange(_ap, _h12, _m);
+            },
           ),
         ),
       ],
@@ -305,11 +325,13 @@ class _WheelState extends State<_Wheel> {
     if (next == _current) return;
     _current = next;
     _animating = true;
-    widget.controller.animateToItem(
+    widget.controller
+        .animateToItem(
       _current,
       duration: const Duration(milliseconds: 110),
       curve: Curves.easeOut,
-    ).whenComplete(() {
+    )
+        .whenComplete(() {
       _animating = false;
       widget.onChanged(_current);
     });
@@ -342,7 +364,10 @@ class _WheelState extends State<_Wheel> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceVariant
+                    .withOpacity(0.5),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -374,7 +399,8 @@ class _WheelState extends State<_Wheel> {
       ),
     );
 
-    if (widget.width != null) return SizedBox(width: widget.width, child: interactive);
+    if (widget.width != null)
+      return SizedBox(width: widget.width, child: interactive);
     return interactive;
   }
 }
@@ -421,17 +447,20 @@ Future<void> showBreakSheet({
                           child: const Text('취소'),
                         ),
                         const Spacer(),
-                        Text('휴게 시간', style: Theme.of(ctx).textTheme.titleMedium),
+                        Text('휴게 시간',
+                            style: Theme.of(ctx).textTheme.titleMedium),
                         const Spacer(),
                         TextButton(
-                          onPressed: () { onDone(cur); Navigator.of(ctx).pop(); },
+                          onPressed: () {
+                            onDone(cur);
+                            Navigator.of(ctx).pop();
+                          },
                           child: const Text('완료'),
                         ),
                       ],
                     ),
                     const Divider(height: 1),
                     const SizedBox(height: 12),
-
                     Wrap(
                       alignment: WrapAlignment.center,
                       spacing: 8,
@@ -443,9 +472,7 @@ Future<void> showBreakSheet({
                         _seg('직접입력', mode == 'custom', () => select('custom')),
                       ],
                     ),
-
                     const SizedBox(height: 12),
-
                     if (mode == 'custom')
                       TextField(
                         autofocus: true,
@@ -456,17 +483,20 @@ Future<void> showBreakSheet({
                           border: OutlineInputBorder(),
                         ),
                         controller: TextEditingController(text: customText)
-                          ..selection = TextSelection.collapsed(offset: customText.length),
+                          ..selection = TextSelection.collapsed(
+                              offset: customText.length),
                         onChanged: (s) {
-                          final v = int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+                          final v = int.tryParse(
+                                  s.replaceAll(RegExp(r'[^0-9]'), '')) ??
+                              0;
                           cur = v.clamp(0, 600);
                           customText = cur == 0 ? '' : cur.toString();
                         },
                       ),
-
                     const SizedBox(height: 12),
                     Text('선택: ${cur}분',
-                        style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant)),
+                        style: TextStyle(
+                            color: Theme.of(ctx).colorScheme.onSurfaceVariant)),
                   ],
                 );
               },
@@ -520,7 +550,10 @@ Future<void> showPaydaySheet({
                         Text('급여일', style: Theme.of(ctx).textTheme.titleMedium),
                         const Spacer(),
                         TextButton(
-                          onPressed: () { onDone(cur); Navigator.of(ctx).pop(); },
+                          onPressed: () {
+                            onDone(cur);
+                            Navigator.of(ctx).pop();
+                          },
                           child: const Text('완료'),
                         ),
                       ],
@@ -533,14 +566,19 @@ Future<void> showPaydaySheet({
                         itemExtent: 40,
                         physics: const FixedExtentScrollPhysics(),
                         controller: ctrl,
-                        onSelectedItemChanged: (i) => setState(() => cur = i + 1),
+                        onSelectedItemChanged: (i) =>
+                            setState(() => cur = i + 1),
                         childDelegate: ListWheelChildBuilderDelegate(
                           childCount: 31,
                           builder: (_, i) => Center(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
                               decoration: BoxDecoration(
-                                color: Theme.of(ctx).colorScheme.surfaceVariant.withOpacity(0.5),
+                                color: Theme.of(ctx)
+                                    .colorScheme
+                                    .surfaceVariant
+                                    .withOpacity(0.5),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text('${i + 1}',
@@ -554,7 +592,8 @@ Future<void> showPaydaySheet({
                     Text(
                       '매월 $cur일',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                      style: TextStyle(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 );
@@ -625,11 +664,14 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
   }
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-  static DateTime _dateOnlyUtc(DateTime d) => DateTime.utc(d.year, d.month, d.day);
+  static DateTime _dateOnlyUtc(DateTime d) =>
+      DateTime.utc(d.year, d.month, d.day);
 
   bool _isSelectedLocal(DateTime localDay) {
     return _selectedUtc.any((u) =>
-        u.year == localDay.year && u.month == localDay.month && u.day == localDay.day);
+        u.year == localDay.year &&
+        u.month == localDay.month &&
+        u.day == localDay.day);
   }
 
   bool _isDisabledLocal(DateTime localDay) {
@@ -640,7 +682,9 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
 
   bool _isToday(DateTime localDay) {
     final now = DateTime.now();
-    return now.year == localDay.year && now.month == localDay.month && now.day == localDay.day;
+    return now.year == localDay.year &&
+        now.month == localDay.month &&
+        now.day == localDay.day;
   }
 
   @override
@@ -671,7 +715,8 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
                   leftChevronVisible: true,
                   rightChevronVisible: true,
                   headerPadding: const EdgeInsets.symmetric(vertical: 8),
-                  titleTextFormatter: (date, locale) => '${date.year}년 ${date.month}월',
+                  titleTextFormatter: (date, locale) =>
+                      '${date.year}년 ${date.month}월',
                   titleTextStyle: theme.textTheme.titleMedium!,
                 ),
                 startingDayOfWeek: StartingDayOfWeek.sunday,
@@ -740,7 +785,9 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
                   // 오늘: 초록색 텍스트, 도형 데코 없음
                   todayBuilder: (ctx, day, _) {
                     final disabled = _isDisabledLocal(day);
-                    final color = disabled ? Colors.green.withOpacity(0.45) : Colors.green;
+                    final color = disabled
+                        ? Colors.green.withOpacity(0.45)
+                        : Colors.green;
                     return Center(
                       child: Text(
                         '${day.day}',
@@ -829,7 +876,8 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
                     const Spacer(),
                     FilledButton(
                       onPressed: () {
-                        final out = _selectedUtc.toList()..sort((a, b) => a.compareTo(b));
+                        final out = _selectedUtc.toList()
+                          ..sort((a, b) => a.compareTo(b));
                         Navigator.of(context).pop(out.toSet());
                       },
                       child: const Text('적용'),
