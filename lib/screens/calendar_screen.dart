@@ -1,6 +1,5 @@
 // lib/screens/calendar_screen.dart
 import 'package:flutter/material.dart';
-import 'package:table_calendar/table_calendar.dart';
 
 import '../common/app_words.dart';
 import '../common/common_pickers.dart' as cp;
@@ -132,45 +131,47 @@ class _TightDayBubble extends StatelessWidget {
   final bool isSun;
   final bool isSat;
 
+  static const _primary = Color(0xFF7C3AED);
+  static const _todayColor = Color(0xFF10B981); // ✅ 오늘 = 초록
+  static const _sunColor = Color(0xFFE53935);
+  static const _satColor = Color(0xFF1E88E5);
+  static const _textPrimary = Color(0xFF111827);
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // ✅ 선택: 작은 보라 동그라미 배경
+    // ✅ 오늘: 배경 없음, 초록 텍스트만
+    // ✅ 나머지: 투명
+    final bg = isSelected ? _primary.withOpacity(0.85) : Colors.transparent;
 
-    final bg = isSelected
-        ? theme.colorScheme.primaryContainer
-        : isToday
-            ? theme.colorScheme.primary.withOpacity(0.06)
-            : Colors.transparent;
-
-    // ✅ 일/토 날짜 색상 (선택 상태에서는 onPrimaryContainer 우선)
-    Color base = theme.colorScheme.onSurface;
-    if (isSun) base = Colors.redAccent;
-    if (isSat) base = Colors.blueAccent;
+    Color base = _textPrimary;
+    if (isSun) base = _sunColor;
+    if (isSat) base = _satColor;
+    if (isToday && !isSelected) base = _todayColor; // ✅ 오늘은 초록
 
     final fg = isSelected
-        ? theme.colorScheme.onPrimaryContainer
-        : base.withOpacity(isOutside ? 0.35 : 0.90);
-
-    final border = (!isSelected && isToday)
-        ? Border.all(
-            color: theme.colorScheme.primary.withOpacity(0.22),
-            width: 1.1,
-          )
-        : null;
+        ? Colors.white
+        : isOutside
+            ? base.withOpacity(0.30)
+            : base;
 
     return Container(
-      width: 34,
-      height: 34,
+      width: 26, // ✅ 34 → 26 (크기 축소)
+      height: 26,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: bg,
         shape: BoxShape.circle,
-        border: border,
       ),
       child: Text(
         text,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontWeight: FontWeight.w900,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: isToday
+              ? FontWeight.w800 // ✅ 오늘은 볼드로 강조
+              : isSelected
+                  ? FontWeight.w700
+                  : FontWeight.w500,
           color: fg,
         ),
       ),
@@ -178,7 +179,44 @@ class _TightDayBubble extends StatelessWidget {
   }
 }
 
-/* ───────────────────────── 내부 모델 ───────────────────────── */
+/* ───────────────────────── 요일 헤더 ───────────────────────── */
+
+class _CalDowHeader extends StatelessWidget {
+  const _CalDowHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = ['일', '월', '화', '수', '목', '금', '토'];
+    const colors = [
+      Color(0xFFE53935), // 일 - 빨강
+      Color(0xFF9CA3AF), // 월
+      Color(0xFF9CA3AF), // 화
+      Color(0xFF9CA3AF), // 수
+      Color(0xFF9CA3AF), // 목
+      Color(0xFF9CA3AF), // 금
+      Color(0xFF1E88E5), // 토 - 파랑
+    ];
+    return SizedBox(
+      height: 28,
+      child: Row(
+        children: List.generate(
+            7,
+            (i) => Expanded(
+                  child: Center(
+                    child: Text(
+                      labels[i],
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: colors[i],
+                      ),
+                    ),
+                  ),
+                )),
+      ),
+    );
+  }
+}
 
 class _MarkerEvent {
   final UICalendarSchedule s;
@@ -197,11 +235,24 @@ class _PayMark {
   final String albaName;
   final Color color;
   final DateTime payDate; // dateOnly
+  final int net; // 세후 예상 수령액
   const _PayMark({
     required this.albaId,
     required this.albaName,
     required this.color,
     required this.payDate,
+    required this.net,
+  });
+}
+
+class _JuhuMark {
+  final String albaId;
+  final String albaName;
+  final Color color;
+  const _JuhuMark({
+    required this.albaId,
+    required this.albaName,
+    required this.color,
   });
 }
 
@@ -210,20 +261,21 @@ class _PayMark {
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
     super.key,
-    required this.onBack,
+    this.onBack,
     required this.albas,
     required this.schedules,
     required this.onDeleteSchedule,
     required this.getTaxPolicy,
     required this.getInsurancePolicy,
     required this.getSurchargePolicy,
+    this.getSurchargeAt,
     required this.openWorkEditor,
     this.getPayrollPolicy,
     this.wageAt,
     this.readOnly = false,
   });
 
-  final VoidCallback onBack;
+  final VoidCallback? onBack;
   final List<UICalendarAlba> albas;
   final List<UICalendarSchedule> schedules;
 
@@ -232,6 +284,8 @@ class CalendarScreen extends StatefulWidget {
   final TaxConfig? Function(String albaId) getTaxPolicy;
   final InsuranceConfig? Function(String albaId) getInsurancePolicy;
   final SurchargePolicy? Function(String albaId) getSurchargePolicy;
+  final SurchargePolicy Function(DateTime)? Function(String albaId)?
+      getSurchargeAt;
 
   final void Function(wargs.WorkEditorArgs) openWorkEditor;
 
@@ -257,6 +311,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
   int _payHash = 0;
   String _payYmKey = '';
   Map<DateTime, List<_PayMark>> _payByDay = const {};
+
+  int _juhuHash = 0;
+  String _juhuYmKey = '';
+  Map<DateTime, List<_JuhuMark>> _juhuByDay = const {};
 
   @override
   void initState() {
@@ -344,6 +402,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     _payYmKey = '';
     _payByDay = const {};
+    _juhuYmKey = '';
+    _juhuByDay = const {};
 
     if (mounted) setState(() {});
   }
@@ -439,9 +499,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
         periods.putIfAbsent(k, () => preview);
       }
 
+      // 세후 수령액 계산에 필요한 정책 (한 번만 조회)
+      final tax = widget.getTaxPolicy(aid) ?? TaxConfig.none;
+      final ins = widget.getInsurancePolicy(aid) ?? const InsuranceNone();
+      final polc = widget.getSurchargePolicy(aid) ?? const SurchargePolicy();
+      final surchargeAt = widget.getSurchargeAt?.call(aid);
+      final albaSchedules =
+          widget.schedules.where((s) => s.albaId == aid).toList();
+
       for (final p in periods.values) {
         final pay = _dateOnly(p.payDate);
         if (!_isSameMonth(pay, y, m)) continue;
+
+        // ✅ 해당 지급 기간의 세후 수령액 계산
+        final summary = const PayrollEngine().summaryForDate(
+          policy: policy,
+          alba: alba,
+          schedules: albaSchedules,
+          tax: tax,
+          insurance: ins,
+          surchargePolicy: polc,
+          wageAt: widget.wageAt,
+          surchargeAt: surchargeAt,
+          anyDateInPeriod: p.period.start,
+        );
 
         (map[pay] ??= <_PayMark>[]).add(
           _PayMark(
@@ -449,6 +530,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             albaName: alba.name,
             color: color,
             payDate: pay,
+            net: summary.net,
           ),
         );
       }
@@ -465,6 +547,81 @@ class _CalendarScreenState extends State<CalendarScreen> {
   List<_PayMark> _payMarksOfDay(DateTime day) {
     final m = _buildPayMarksForMonth(_focusedDay.year, _focusedDay.month);
     return m[_dateOnly(day)] ?? const <_PayMark>[];
+  }
+
+  // ───────────────────────── 주휴 뱃지 계산 ─────────────────────────
+
+  Map<DateTime, List<_JuhuMark>> _buildJuhuMarksForMonth(int y, int m) {
+    final ymKey = '$y-$m-juhu';
+    final h = Object.hash(_cacheHash, ymKey, Object.hashAll(activeIds));
+    if (_juhuYmKey == ymKey && _juhuHash == h) return _juhuByDay;
+
+    _juhuYmKey = ymKey;
+    _juhuHash = h;
+
+    final map = <DateTime, List<_JuhuMark>>{};
+
+    // Scan a wider range to catch work weeks that span month boundaries
+    final monthStart = DateTime(y, m, 1);
+    final monthEnd = DateTime(y, m + 1, 0); // last day of month
+
+    for (final aid in activeIds) {
+      final sur = widget.getSurchargePolicy(aid);
+      if (sur == null || !sur.weeklyHolidayEnabled) continue;
+
+      final alba = _albaByIdOrDefault(aid);
+      final color = cp.parseColor(alba.colorHex);
+      final holidayWeekday = sur.weeklyHolidayWeekday; // default: DateTime.sunday = 7
+
+      // Accumulate worked minutes per week (Monday-based week start)
+      final weeklyMinutes = <DateTime, int>{};
+
+      // Look at schedules slightly beyond month boundaries to catch spanning weeks
+      final rangeStart = monthStart.subtract(const Duration(days: 7));
+      final rangeEnd = monthEnd.add(const Duration(days: 7));
+
+      for (final s in widget.schedules) {
+        if (s.albaId != aid) continue;
+        final d = DateTime(s.year, s.month, s.day);
+        if (d.isBefore(rangeStart) || d.isAfter(rangeEnd)) continue;
+
+        // weekStart = Monday of this schedule's week
+        final weekStart = d.subtract(Duration(days: d.weekday - 1));
+        final worked = _workedMinutes(s);
+        weeklyMinutes[weekStart] = (weeklyMinutes[weekStart] ?? 0) + worked;
+      }
+
+      // For each qualifying week, check if the holiday date falls in this month
+      for (final entry in weeklyMinutes.entries) {
+        if (entry.value < 15 * 60) continue; // < 15 hours threshold
+
+        final weekStart = entry.key;
+        // Holiday date = weekStart (Monday) + (holidayWeekday - 1) days
+        final holidayDate = _dateOnly(weekStart.add(Duration(days: holidayWeekday - 1)));
+
+        if (!_isSameMonth(holidayDate, y, m)) continue;
+
+        (map[holidayDate] ??= <_JuhuMark>[]).add(
+          _JuhuMark(
+            albaId: aid,
+            albaName: alba.name,
+            color: color,
+          ),
+        );
+      }
+    }
+
+    for (final k in map.keys) {
+      map[k]!.sort((a, b) => a.albaName.compareTo(b.albaName));
+    }
+
+    _juhuByDay = map;
+    return map;
+  }
+
+  List<_JuhuMark> _juhuMarksOfDay(DateTime day) {
+    final m = _buildJuhuMarksForMonth(_focusedDay.year, _focusedDay.month);
+    return m[_dateOnly(day)] ?? const <_JuhuMark>[];
   }
 
   // ───────────────────────── 삭제 확인 ─────────────────────────
@@ -486,9 +643,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
               onPressed: () => Navigator.pop(dctx, false),
               child: const Text(AppWords.cancel),
             ),
-            FilledButton(
+            TextButton(
               onPressed: () => Navigator.pop(dctx, true),
-              child: const Text(AppWords.delete),
+              child: const Text(AppWords.delete,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
             ),
           ],
         );
@@ -516,6 +675,17 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _onTapDay(DateTime day, List<_MarkerEvent> events) async {
     final localDate = DateTime(day.year, day.month, day.day);
     final payMarks = _payMarksOfDay(day);
+
+    // ✅ B안: 근무 없는 날 탭 → 바로 근무 추가 (readOnly 제외)
+    if (events.isEmpty && !widget.readOnly) {
+      widget.openWorkEditor(
+        wargs.WorkEditorArgs(
+          mode: wargs.WorkEditorArgsMode.add,
+          presetDate: localDate,
+        ),
+      );
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -568,6 +738,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     block: block,
                     localDate: localDate,
                     readOnly: widget.readOnly,
+                    wageAt: widget.wageAt,
                     onEdit: (scheduleId) {
                       if (widget.readOnly) return;
                       Navigator.pop(ctx);
@@ -642,25 +813,42 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       const SizedBox(width: 10),
                       payBadgeRow(),
                       const Spacer(),
-                      if (!widget.readOnly)
-                        IconButton(
-                          tooltip: AppWords.addWork,
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            widget.openWorkEditor(
-                              wargs.WorkEditorArgs(
-                                mode: wargs.WorkEditorArgsMode.add,
-                                presetDate: localDate,
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.add_circle_outline),
-                        ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 6),
                 ...albaCards,
+                // ✅ 근무 있는 날 바텀시트 하단 - 근무 추가 버튼
+                if (!widget.readOnly) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          widget.openWorkEditor(
+                            wargs.WorkEditorArgs(
+                              mode: wargs.WorkEditorArgsMode.add,
+                              presetDate: localDate,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.add_rounded, size: 20),
+                        label: const Text('근무 추가',
+                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF7C3AED),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -679,49 +867,64 @@ class _CalendarScreenState extends State<CalendarScreen> {
     required bool isOutside,
   }) {
     final payMarks = _payMarksOfDay(day);
+    final juhuMarks = _juhuMarksOfDay(day);
     final chipsData = _chipsOf(day);
 
-    final idx = day.weekday % 7; // Sunday=0 ... Saturday=6
+    final idx = day.weekday % 7;
     final isSun = idx == 0;
     final isSat = idx == 6;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              _TightDayBubble(
-                text: '${day.day}',
-                isToday: isToday,
-                isSelected: isSelected,
-                isOutside: isOutside,
-                isSun: isSun,
-                isSat: isSat,
-              ),
-              Expanded(child: _InlinePayBadges(marks: payMarks)),
-            ],
+    // ✅ Container 제거 - clipBehavior + color 동시 사용 시 Flutter assertion 에러 발생
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.max,
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        const SizedBox(height: 3),
+        // 날짜 버블
+        Align(
+          alignment: Alignment.topCenter,
+          child: _TightDayBubble(
+            text: '${day.day}',
+            isToday: isToday,
+            isSelected: isSelected,
+            isOutside: isOutside,
+            isSun: isSun,
+            isSat: isSat,
           ),
+        ),
 
-          // ✅ 근무 바를 "날짜 바로 아래"로
-          if (chipsData.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _Bars(chips: chipsData),
-          ],
+        const SizedBox(height: 1),
 
-          const Spacer(),
-        ],
-      ),
+        // 급여일 뱃지
+        if (payMarks.isNotEmpty && !isOutside)
+          Center(child: _InlinePayBadges(marks: payMarks)),
+
+        // 주휴 뱃지
+        if (juhuMarks.isNotEmpty && !isOutside)
+          Center(child: _InlineJuhuBadges(marks: juhuMarks)),
+
+        // 근무 시간 바
+        if (chipsData.isNotEmpty && !isOutside) _Bars(chips: chipsData),
+      ],
     );
   }
 
-  // ✅ 월별 rowHeight 계산: 화면 빈공간을 달력 셀이 먹도록
+  // 자연 행 수 계산 (최소 5주 보장)
   int _weeksInMonthGrid(DateTime focusedDay) {
     final first = DateTime(focusedDay.year, focusedDay.month, 1);
-    final firstWeekday = first.weekday % 7; // Sunday=0 ... Saturday=6
+    final firstDow = first.weekday % 7; // 0=일 ... 6=토
     final daysInMonth = DateTime(focusedDay.year, focusedDay.month + 1, 0).day;
-    return ((firstWeekday + daysInMonth) / 7.0).ceil();
+    final natural = ((firstDow + daysInMonth) / 7.0).ceil();
+    return natural < 5 ? 5 : natural; // 최소 5주
+  }
+
+  // 그리드 위치(weekIdx, dowIdx) → 날짜
+  DateTime _gridDayAt(int weekIdx, int dowIdx) {
+    final first = DateTime(_focusedDay.year, _focusedDay.month, 1);
+    final firstDow = first.weekday % 7; // 0=일
+    final offset = weekIdx * 7 + dowIdx - firstDow;
+    return first.add(Duration(days: offset));
   }
 
   @override
@@ -741,6 +944,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               s.month == _focusedDay.month)
           .toList();
 
+      final surchargeAt = widget.getSurchargeAt?.call(aid);
       final summary = computeMonthlySummary(
         alba: alba,
         ymYear: _focusedDay.year,
@@ -749,6 +953,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         tax: tax,
         insurance: ins,
         policy: polc,
+        surchargeAt: surchargeAt,
         wageAt: widget.wageAt,
       );
       netSum += summary.net;
@@ -756,17 +961,32 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     final theme = Theme.of(context);
     _buildPayMarksForMonth(_focusedDay.year, _focusedDay.month);
+    _buildJuhuMarksForMonth(_focusedDay.year, _focusedDay.month);
 
     final weeks = _weeksInMonthGrid(_focusedDay);
-    const daysOfWeekHeight = 22.0;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF8F7FF), // PaymoaColors.background
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new),
-          onPressed: widget.onBack,
+        backgroundColor: const Color(0xFFF8F7FF),
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        // 뒤로가기 콜백이 있으면 leading 버튼 표시 (사장님 알바 캘린더 진입 시)
+        leading: widget.onBack != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 20, color: Color(0xFF111827)),
+                onPressed: widget.onBack!,
+              )
+            : null,
+        title: const Text(
+          AppWords.calendar,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+            color: Color(0xFF111827),
+          ),
         ),
-        title: const Text(AppWords.calendar),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -775,7 +995,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
               child: _TossCard(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                 child: Column(
@@ -811,173 +1031,190 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Text(
-                          AppWords.monthlyNetEstimate,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color:
-                                theme.colorScheme.onSurface.withOpacity(0.70),
-                            fontWeight: FontWeight.w700,
+                        const Text(
+                          '예상 수령',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF9CA3AF),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
                           '${_comma(netSum)}원',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF111827),
                           ),
                         ),
                       ],
                     ),
-                    if (widget.albas.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: widget.albas.map((a) {
-                            final on = activeIds.contains(a.id);
-                            final c = cp.parseColor(a.colorHex);
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: FilterChip(
-                                label: Text(a.name),
-                                selected: on,
-                                selectedColor: c.withOpacity(0.18),
-                                onSelected: (_) {
-                                  setState(() {
-                                    if (on) {
-                                      activeIds.remove(a.id);
-                                    } else {
-                                      activeIds.add(a.id);
-                                    }
-                                    _payYmKey = '';
-                                  });
-                                },
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                  ],
+                    // ✅ 알바 뱃지 영역 - 항상 고정 높이 28px (없으면 빈 공간)
+                    SizedBox(
+                      height: 28,
+                      child: widget.albas.isNotEmpty
+                          ? SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Builder(builder: (ctx) {
+                                final albasInMonth = widget.albas
+                                    .where(
+                                      (a) => widget.schedules.any((s) =>
+                                          s.albaId == a.id &&
+                                          s.year == _focusedDay.year &&
+                                          s.month == _focusedDay.month),
+                                    )
+                                    .toList();
+                                if (albasInMonth.isEmpty)
+                                  return const SizedBox.shrink();
+                                return Row(
+                                  children: albasInMonth.map((a) {
+                                    final on = activeIds.contains(a.id);
+                                    final c = cp.parseColor(a.colorHex);
+                                    return GestureDetector(
+                                      onTap: () => setState(() {
+                                        if (on)
+                                          activeIds.remove(a.id);
+                                        else
+                                          activeIds.add(a.id);
+                                        _payYmKey = '';
+                                        _juhuYmKey = '';
+                                      }),
+                                      child: AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 180),
+                                        margin: const EdgeInsets.only(right: 6),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: on ? c : c.withOpacity(0.10),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                        ),
+                                        child: Text(
+                                          a.name,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: on ? Colors.white : c,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                );
+                              }),
+                            )
+                          : null,
+                    ),
+                  ], // Column children
                 ),
               ),
             ),
+            // ── 커스텀 달력 그리드 ──────────────────────────────
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                 child: _TossCard(
-                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-                  child: LayoutBuilder(
-                    builder: (ctx, cons) {
-                      final available =
-                          (cons.maxHeight - daysOfWeekHeight).clamp(0.0, 99999);
-
-                      final computedRowHeight =
-                          (available / weeks).clamp(86.0, 140.0);
-
-                      return TableCalendar<_MarkerEvent>(
-                        locale: 'ko_KR',
-                        firstDay: DateTime.utc(2010, 1, 1),
-                        lastDay: DateTime.utc(2035, 12, 31),
-                        focusedDay: _focusedDay,
-                        selectedDayPredicate: (d) => isSameDay(_selectedDay, d),
-                        headerVisible: false,
-                        startingDayOfWeek: StartingDayOfWeek.sunday,
-                        calendarFormat: CalendarFormat.month,
-                        availableGestures: AvailableGestures.horizontalSwipe,
-                        rowHeight: computedRowHeight,
-                        daysOfWeekHeight: daysOfWeekHeight,
-                        calendarStyle: const CalendarStyle(
-                          outsideDaysVisible: true,
-                          isTodayHighlighted: false,
-                          tablePadding: EdgeInsets.zero,
-                          cellMargin: EdgeInsets.zero,
-                          cellPadding: EdgeInsets.zero,
-                        ),
-                        eventLoader: (day) => _eventsOf(day),
-                        calendarBuilders: CalendarBuilders<_MarkerEvent>(
-                          dowBuilder: (ctx, day) {
-                            const labels = ['일', '월', '화', '수', '목', '금', '토'];
-                            final idx = day.weekday % 7;
-                            final isSun = idx == 0;
-                            final isSat = idx == 6;
-
-                            final Color color = isSun
-                                ? Colors.redAccent.withOpacity(0.75)
-                                : isSat
-                                    ? Colors.blueAccent.withOpacity(0.75)
-                                    : theme.colorScheme.onSurface
-                                        .withOpacity(0.55);
-
-                            // ✅ 날짜 셀과 동일 padding → X축 정렬 맞춤
-                            return Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: Center(
-                                child: Text(
-                                  labels[idx],
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                    color: color,
+                  padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
+                  child: GestureDetector(
+                    // 수평 스와이프 → 월 이동
+                    onHorizontalDragEnd: (d) {
+                      final v = d.primaryVelocity ?? 0;
+                      if (v < -250) {
+                        setState(() {
+                          _focusedDay = DateTime(
+                              _focusedDay.year, _focusedDay.month + 1, 1);
+                          _selectedDay = null;
+                        });
+                      } else if (v > 250) {
+                        setState(() {
+                          _focusedDay = DateTime(
+                              _focusedDay.year, _focusedDay.month - 1, 1);
+                          _selectedDay = null;
+                        });
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        // ── 요일 헤더
+                        _CalDowHeader(),
+                        // ── 격자 구분선
+                        Container(height: 0.5, color: const Color(0xFFE5E7EB)),
+                        // ── 날짜 그리드
+                        Expanded(
+                          child: Column(
+                            children: [
+                              for (int w = 0; w < weeks; w++) ...[
+                                Expanded(
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      for (int d = 0; d < 7; d++) ...[
+                                        Expanded(
+                                          child: Builder(builder: (ctx) {
+                                            final day = _gridDayAt(w, d);
+                                            final isOutside =
+                                                day.month != _focusedDay.month;
+                                            final isToday = _dateOnly(day) ==
+                                                _dateOnly(DateTime.now());
+                                            final isSelected = _selectedDay !=
+                                                    null &&
+                                                _dateOnly(day) ==
+                                                    _dateOnly(_selectedDay!);
+                                            return GestureDetector(
+                                              onTap: () async {
+                                                final ev = _eventsOf(day);
+                                                setState(
+                                                    () => _selectedDay = day);
+                                                await _onTapDay(day, ev);
+                                                if (mounted)
+                                                  setState(() =>
+                                                      _selectedDay = null);
+                                              },
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    right: d < 6
+                                                        ? const BorderSide(
+                                                            color: Color(
+                                                                0xFFE5E7EB),
+                                                            width:
+                                                                1.0) // ✅ 더 선명하게
+                                                        : BorderSide.none,
+                                                  ),
+                                                ),
+                                                child: _dayCell(
+                                                  ctx,
+                                                  day,
+                                                  isToday: isToday,
+                                                  isSelected: isSelected,
+                                                  isOutside: isOutside,
+                                                ),
+                                              ),
+                                            );
+                                          }),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
-                              ),
-                            );
-                          },
-                          defaultBuilder: (ctx, day, _) => _dayCell(
-                            ctx,
-                            day,
-                            isToday: false,
-                            isSelected: false,
-                            isOutside: false,
+                                // 행 구분선 (마지막 행 제외)
+                                if (w < weeks - 1)
+                                  Container(
+                                      height: 1.0,
+                                      color: const Color(0xFFE5E7EB)),
+                              ],
+                            ],
                           ),
-                          todayBuilder: (ctx, day, _) => _dayCell(
-                            ctx,
-                            day,
-                            isToday: true,
-                            isSelected: false,
-                            isOutside: false,
-                          ),
-                          selectedBuilder: (ctx, day, _) => _dayCell(
-                            ctx,
-                            day,
-                            isToday: false,
-                            isSelected: true,
-                            isOutside: false,
-                          ),
-                          outsideBuilder: (ctx, day, _) => _dayCell(
-                            ctx,
-                            day,
-                            isToday: false,
-                            isSelected: false,
-                            isOutside: true,
-                          ),
-                          markerBuilder: (ctx, day, events) =>
-                              const SizedBox.shrink(),
                         ),
-                        onDaySelected: (selectedDay, focusedDay) async {
-                          final ev = _eventsOf(selectedDay);
-
-                          setState(() {
-                            _selectedDay = selectedDay;
-                            _focusedDay = focusedDay;
-                          });
-
-                          await _onTapDay(selectedDay, ev);
-
-                          if (!mounted) return;
-                          setState(() => _selectedDay = null);
-                        },
-                        onPageChanged: (fd) => setState(() {
-                          _focusedDay = fd;
-                          _selectedDay = null;
-                        }),
-                      );
-                    },
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
+            ), // Expanded
           ],
         ),
       ),
@@ -998,27 +1235,93 @@ class _InlinePayBadges extends StatelessWidget {
     final shown = marks.take(2).toList();
     final more = marks.length - shown.length;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(width: 6),
-        for (final m in shown)
-          Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: _GupBadge(color: m.color),
-          ),
-        if (more > 0)
-          Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: Text(
-              '+$more',
-              style: Theme.of(context)
-                  .textTheme
-                  .labelSmall
-                  ?.copyWith(fontSize: 10),
+    return GestureDetector(
+      onTap: () {
+        _showPayDaySheet(context, marks);
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(width: 6),
+          for (final m in shown)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: _GupBadge(color: m.color),
             ),
+          if (more > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(
+                '+$more',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(fontSize: 10),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showPayDaySheet(BuildContext context, List<_PayMark> marks) {
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '급여일',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 16),
+              for (final m in marks)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: m.color,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          m.albaName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${_comma(m.net)}원',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF7C3AED),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
-      ],
+        ),
+      ),
     );
   }
 }
@@ -1029,20 +1332,74 @@ class _GupBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 작은 동그라미로 변경
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      width: 6,
+      height: 6,
       decoration: BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color, width: 1.3),
+        color: color,
+        shape: BoxShape.circle,
       ),
-      child: Text(
-        '급',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-              color: color,
+    );
+  }
+}
+
+class _InlineJuhuBadges extends StatelessWidget {
+  const _InlineJuhuBadges({required this.marks});
+  final List<_JuhuMark> marks;
+
+  @override
+  Widget build(BuildContext context) {
+    if (marks.isEmpty) return const SizedBox.shrink();
+
+    final shown = marks.take(2).toList();
+    final more = marks.length - shown.length;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(width: 6),
+        for (final m in shown)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: _JuhuPill(color: m.color),
+          ),
+        if (more > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 3),
+            child: Text(
+              '+$more',
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(fontSize: 9),
             ),
+          ),
+      ],
+    );
+  }
+}
+
+class _JuhuPill extends StatelessWidget {
+  const _JuhuPill({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: const Text(
+        '주',
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.w900,
+          color: Colors.white,
+          height: 1.1,
+        ),
       ),
     );
   }
@@ -1114,8 +1471,8 @@ class _CalendarHourBar extends StatelessWidget {
         color.computeLuminance() > 0.5 ? Colors.black : Colors.white;
 
     return Container(
-      height: 18,
-      margin: const EdgeInsets.only(top: 4),
+      height: 16,
+      margin: const EdgeInsets.only(top: 1, left: 1, right: 1),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(6),
@@ -1313,6 +1670,7 @@ class _ExpandableMergedCard extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     required this.readOnly,
+    this.wageAt,
   });
 
   final UICalendarAlba alba;
@@ -1324,6 +1682,7 @@ class _ExpandableMergedCard extends StatefulWidget {
   final void Function(String scheduleId) onDelete;
 
   final bool readOnly;
+  final int Function(String albaId, DateTime dateLocal)? wageAt;
 
   @override
   State<_ExpandableMergedCard> createState() => _ExpandableMergedCardState();
@@ -1339,6 +1698,10 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
 
     final totalHoursText = _hoursText(b.totalWorkedMinutes);
     final typeLabel = _typeLabelByTime(b.children);
+    final firstSchedule = b.children.isNotEmpty ? b.children.first : null;
+    final effectiveWage = firstSchedule?.overrideHourlyWage ??
+        widget.wageAt?.call(widget.alba.id, widget.localDate) ??
+        widget.alba.hourlyWage;
 
     final lines = [...b.children]..sort((a, b) {
         final amn = a.startHour * 60 + a.startMinute;
@@ -1363,10 +1726,10 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
+              // ── 근무유형 뱃지
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: widget.color.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(999),
@@ -1376,6 +1739,26 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: theme.colorScheme.onSurface.withOpacity(0.75),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 5),
+              // ── 시급 뱃지 (근무유형 오른쪽, overrideHourlyWage 우선)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: widget.color.withOpacity(0.13),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: widget.color.withOpacity(0.25),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '${_commaInt(effectiveWage)}원/시',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: widget.color,
                   ),
                 ),
               ),
@@ -1459,4 +1842,15 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
       ],
     );
   }
+}
+
+String _commaInt(int n) {
+  final s = n.toString();
+  final b = StringBuffer();
+  for (int i = 0; i < s.length; i++) {
+    b.write(s[i]);
+    final left = s.length - i - 1;
+    if (left > 0 && left % 3 == 0) b.write(',');
+  }
+  return b.toString();
 }

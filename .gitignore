@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # -----------------------------
 # Flutter / Dart
 # -----------------------------
@@ -82,10 +81,7 @@ linux/flutter/ephemeral/
 # -----------------------------
 # Web
 # -----------------------------
-# 빌드 산출물
 web/.dart_tool/
-# 서비스워커 등은 보통 커밋하지만, 커스텀 키가 있을 경우 예외 처리
-# web/firebase-messaging-sw.js
 
 # -----------------------------
 # Firebase / Secrets (공통)
@@ -94,10 +90,15 @@ web/.dart_tool/
 .env.*
 *.env
 *.secrets
-# flutterfire 자동 생성 옵션 파일(키 노출 우려 시 제외)
 lib/firebase_options.dart
-# 템플릿은 커밋 권장
 !lib/firebase_options.sample.dart
+
+# -----------------------------
+# Local config (machine-specific)
+# -----------------------------
+local.properties
+.gradle/
+devtools_options.yaml
 
 # -----------------------------
 # Logs / OS files
@@ -107,20 +108,3 @@ lib/firebase_options.dart
 *.seed
 .DS_Store
 Thumbs.db
-=======
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
->>>>>>> b2d7ffa419df0be020a39344497e93082c8eb2b4

@@ -16,6 +16,7 @@ class StoreSchedule {
   final int breakMinutes;
 
   final String workType;
+  final int? overrideHourlyWage; // ✅ 날짜별 시급 override
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -32,6 +33,7 @@ class StoreSchedule {
     required this.endMinute,
     required this.breakMinutes,
     required this.workType,
+    this.overrideHourlyWage,
     this.createdAt,
     this.updatedAt,
   });
@@ -59,6 +61,7 @@ class StoreSchedule {
       endMinute: (data['endMinute'] as num?)?.toInt() ?? 0,
       breakMinutes: (data['breakMinutes'] as num?)?.toInt() ?? 0,
       workType: (data['workType'] ?? 'basic') as String,
+      overrideHourlyWage: (data['overrideHourlyWage'] as num?)?.toInt(), // ✅
       createdAt: _toDate(data['createdAt']),
       updatedAt: _toDate(data['updatedAt']),
     );

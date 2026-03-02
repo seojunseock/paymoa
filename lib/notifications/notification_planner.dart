@@ -60,7 +60,7 @@ class NotificationPlanner {
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'paycount_default',
-    'PayCount 기본 알림',
+    '페이모아 기본 알림',
     description: '근무/급여일 알림',
     importance: Importance.high,
   );

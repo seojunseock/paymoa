@@ -5,7 +5,7 @@ import '../../models/store.dart';
 import '../../models/store_worker.dart';
 import '../../models/store_schedule.dart';
 
-import '../../data/owner_schedule_repository.dart';
+import '../../data/firebase_service.dart';
 import '../../policies/policies.dart';
 import '../../policies/policy_mapper.dart' as pm;
 
@@ -31,7 +31,7 @@ class OwnerWorkerCalendarAsAlbaScreen extends StatefulWidget {
 
 class _OwnerWorkerCalendarAsAlbaScreenState
     extends State<OwnerWorkerCalendarAsAlbaScreen> {
-  final _scheduleRepo = OwnerScheduleRepository();
+  final _scheduleRepo = FirebaseService();
 
   @override
   Widget build(BuildContext context) {
@@ -97,9 +97,7 @@ class _OwnerWorkerCalendarAsAlbaScreenState
                 endMinute: s.endMinute,
                 breakMinutes: s.breakMinutes,
                 workType: _mapWorkType(s.workType),
-
-                // ✅ 핵심: StoreSchedule에 없으니 접근 금지
-                overrideHourlyWage: null,
+                overrideHourlyWage: s.overrideHourlyWage, // ✅ 날짜별 시급 반영
               ),
             )
             .toList(growable: false);
@@ -114,6 +112,73 @@ class _OwnerWorkerCalendarAsAlbaScreenState
           );
         }
 
+        // ✅ 날짜별 시급 반환 (overrideHourlyWage 우선 → policyHistory → effectiveWage)
+        // 핵심버그 수정: 이전에는 policyHistory를 보지 않아 과거 근무도 현재 시급으로 표시됨
+        final wagePh = worker.inheritFromStore
+            ? store.policyHistory
+            : worker.policyHistory;
+
+        // policyHistory에서 날짜별 시급 밴드 빌드
+        List<({DateTime from, int wage})> wageBands = [];
+        if (wagePh.isNotEmpty) {
+          final wageEntries = wagePh.entries
+              .where((e) => e.rawPolicy['hourlyWage'] != null)
+              .toList()
+            ..sort((a, b) => a.effectiveFrom.compareTo(b.effectiveFrom));
+          if (wageEntries.isNotEmpty) {
+            // 첫 번째 항목 이전 시급 (previousHourlyWage)
+            final prevW = wageEntries.first.rawPolicy['previousHourlyWage'];
+            if (prevW != null) {
+              final pw = (prevW is int)
+                  ? prevW
+                  : (prevW is num)
+                      ? prevW.toInt()
+                      : int.tryParse('$prevW') ?? 0;
+              if (pw > 0) wageBands.add((from: DateTime(1970), wage: pw));
+            }
+            for (final e in wageEntries) {
+              final w = e.rawPolicy['hourlyWage'];
+              final wage = (w is int)
+                  ? w
+                  : (w is num)
+                      ? w.toInt()
+                      : int.tryParse('$w') ?? 0;
+              if (wage > 0) wageBands.add((from: e.effectiveFrom, wage: wage));
+            }
+          }
+        }
+
+        int wageAt(String albaId, DateTime dateLocal) {
+          // 1) 해당 날짜 스케줄의 overrideHourlyWage 우선
+          try {
+            final match = schedules.firstWhere(
+              (s) =>
+                  s.year == dateLocal.year &&
+                  s.month == dateLocal.month &&
+                  s.day == dateLocal.day,
+            );
+            final override = match.overrideHourlyWage;
+            if (override != null && override > 0) return override;
+          } catch (_) {}
+
+          // 2) policyHistory 밴드에서 날짜별 시급 조회
+          if (wageBands.isNotEmpty) {
+            final d0 = DateTime(dateLocal.year, dateLocal.month, dateLocal.day);
+            int? last;
+            for (final b in wageBands) {
+              if (!b.from.isAfter(d0)) {
+                last = b.wage;
+              } else {
+                break;
+              }
+            }
+            if (last != null) return last;
+          }
+
+          // 3) fallback: 현재 유효 시급
+          return effectiveWage;
+        }
+
         return CalendarScreen(
           onBack: () => Navigator.of(context).pop(),
           albas: [alba],
@@ -126,6 +191,7 @@ class _OwnerWorkerCalendarAsAlbaScreenState
           getInsurancePolicy: (_) => effectiveInsurance,
           getSurchargePolicy: (_) => effectiveSurcharge,
           getPayrollPolicy: payrollPolicyGetter,
+          wageAt: wageAt,
 
           // readOnly라 열리지 않음
           openWorkEditor: (_) {},

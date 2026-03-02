@@ -1,5 +1,7 @@
 // lib/policies/policy_mapper.dart
 import 'policies.dart' as pol;
+import '../payroll/payroll.dart';
+import '../payroll/payroll_policy_mapper.dart' as ppm;
 
 /// Firestore policy(Map) <-> 정책 객체 변환 유틸 (장기 안정 버전)
 ///
@@ -296,6 +298,7 @@ Map<String, dynamic> buildPolicyMap({
   required pol.TaxConfig tax,
   required pol.InsuranceConfig insurance,
   pol.SurchargePolicy? surcharge,
+  PayrollPolicy? payrollPolicy,
 }) {
   final out = <String, dynamic>{};
   out['tax'] = taxConfigToPolicyNode(tax);
@@ -305,6 +308,11 @@ Map<String, dynamic> buildPolicyMap({
   out['surcharge'] = (surcharge == null)
       ? <String, dynamic>{'enabled': false}
       : surchargePolicyToPolicyNode(surcharge);
+
+  // ✅ payrollPolicy도 함께 저장 (앱 재시작 시 복원)
+  if (payrollPolicy != null) {
+    out['payrollPolicy'] = ppm.payrollPolicyToMap(payrollPolicy);
+  }
 
   return out;
 }

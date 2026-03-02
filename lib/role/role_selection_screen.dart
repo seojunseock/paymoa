@@ -17,11 +17,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     setState(() => _busy = true);
 
     try {
-      // ✅ 여기서는 저장만 수행 (RoleGate가 자동으로 Shell로 전환)
       await widget.onPick(role);
-
-      // RoleGate가 rebuild되면서 이 화면이 dispose될 수 있으므로,
-      // 여기서 추가 네비게이션/상태 변경은 하지 않음.
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -36,66 +32,139 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('시작하기'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          '시작하기',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF1F2937),
+          ),
+        ),
         centerTitle: true,
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
+              const SizedBox(height: 8),
+
+              // ── 앱 아이콘 (로그인 화면과 동일한 방식)
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF7C3AED).withAlpha(24),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withAlpha(12),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset(
+                    'assets/images/splash_logo.png',
+                    width: 96,
+                    height: 96,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 18),
+
+              const Text(
+                '페이모아',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF1F2937),
+                  letterSpacing: -0.5,
+                ),
+              ),
+
+              const SizedBox(height: 32),
+
+              const Text(
                 '어떤 역할로 시작할까요?',
-                style: theme.textTheme.titleLarge?.copyWith(
+                style: TextStyle(
+                  fontSize: 20,
                   fontWeight: FontWeight.w800,
+                  color: Color(0xFF1F2937),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '한 번만 선택하면 다음 로그인부터 자동으로 바로 들어가요.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(height: 8),
+              const Text(
+                '한 번만 선택하면 다음 로그인부터\n자동으로 바로 들어가요.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B7280),
+                  height: 1.5,
                 ),
               ),
-              const SizedBox(height: 16),
+
+              const SizedBox(height: 28),
+
+              // ── 사장님 카드
               _RoleCard(
                 enabled: !_busy,
                 title: '사장님으로 시작',
                 subtitle: '매장 등록 · 알바 급여/세무 문서 관리',
                 icon: Icons.store_outlined,
-                accent: theme.colorScheme.primary,
+                accent: const Color(0xFF7C3AED),
                 onTap: () => _handlePick(UserRole.owner),
               ),
-              const SizedBox(height: 12),
+
+              const SizedBox(height: 14),
+
+              // ── 알바생 카드
               _RoleCard(
                 enabled: !_busy,
                 title: '알바생으로 시작',
                 subtitle: '근무 기록 · 나의 급여/정산 확인',
                 icon: Icons.badge_outlined,
-                accent: theme.colorScheme.tertiary,
+                accent: const Color(0xFF0EA5E9),
                 onTap: () => _handlePick(UserRole.alba),
               ),
+
               const Spacer(),
+
+              // ── 로딩 인디케이터
               if (_busy)
-                Center(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 10),
-                      Text(
-                        '이동 중…',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                Column(
+                  children: [
+                    const CircularProgressIndicator(
+                      color: Color(0xFF7C3AED),
+                      strokeWidth: 2.5,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '이동 중…',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w500,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -124,64 +193,81 @@ class _RoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Opacity(
-      opacity: enabled ? 1 : 0.6,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: enabled ? onTap : null,
-        child: Ink(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: accent.withOpacity(0.25),
-              width: 1.2,
+      opacity: enabled ? 1.0 : 0.55,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: enabled ? onTap : null,
+          child: Ink(
+            padding: const EdgeInsets.fromLTRB(16, 16, 14, 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: accent.withAlpha(50),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withAlpha(18),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withAlpha(8),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                // 아이콘 원형 배지
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: accent.withAlpha(22),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: accent, size: 26),
                 ),
-                child: Icon(icon, color: accent),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF1F2937),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF6B7280),
+                          height: 1.4,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const Icon(Icons.chevron_right),
-            ],
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: accent.withAlpha(180),
+                  size: 22,
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -1,16 +1,22 @@
 // lib/screens/my_info_screen.dart
-// ✅ 문구는 AppWords로 통일
-// ✅ 그래프 로직/계산은 StatsRepository 그대로 사용
-
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../common/app_words.dart';
-import '../data/stats_repository.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
+import '../payroll/pay_calculator.dart';
+
+class _MonthPoint {
+  final int year;
+  final int month;
+  final int net;
+  const _MonthPoint(
+      {required this.year, required this.month, required this.net});
+  String get label => '${month}월';
+}
 
 class MyInfoScreen extends StatefulWidget {
   const MyInfoScreen({
@@ -21,13 +27,13 @@ class MyInfoScreen extends StatefulWidget {
     required this.taxOf,
     required this.insuranceOf,
     required this.policyOf,
+    this.surchargeAt,
     this.userAge,
     required this.payDay,
     this.onLogout,
     this.onDeleteAccount,
     this.onOpenTerms,
     this.onOpenPrivacy,
-    this.onOpenFaq,
     this.onOpenSupport,
   });
 
@@ -37,15 +43,14 @@ class MyInfoScreen extends StatefulWidget {
   final TaxConfig? Function(String albaId) taxOf;
   final InsuranceConfig? Function(String albaId) insuranceOf;
   final SurchargePolicy? Function(String albaId) policyOf;
-
+  final SurchargePolicy Function(DateTime)? Function(String albaId)?
+      surchargeAt;
   final int? userAge;
   final int payDay;
-
   final VoidCallback? onLogout;
   final VoidCallback? onDeleteAccount;
   final VoidCallback? onOpenTerms;
   final VoidCallback? onOpenPrivacy;
-  final VoidCallback? onOpenFaq;
   final VoidCallback? onOpenSupport;
 
   @override
@@ -53,56 +58,65 @@ class MyInfoScreen extends StatefulWidget {
 }
 
 class _MyInfoScreenState extends State<MyInfoScreen> {
-  final StatsRepository _stats = const StatsRepository();
-
-  int _monthlyGoal = 1000000;
-
-  DateTime? _lastRefreshedAt =
-      DateTime.now().subtract(const Duration(days: 10));
-
-  List<MonthlyIncomePoint> _bars = const [];
-  List<double> _line = const [];
-  int? _age;
+  List<_MonthPoint> _points = const [];
+  int _touchedIndex = -1;
 
   @override
   void initState() {
     super.initState();
-    _age = widget.userAge;
-    _computeGraph();
+    _computePoints();
   }
 
   @override
-  void didUpdateWidget(covariant MyInfoScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final paydayChanged = oldWidget.payDay != widget.payDay;
-    final albasChanged = oldWidget.albas.length != widget.albas.length;
-    final schedulesChanged =
-        oldWidget.schedules.length != widget.schedules.length;
-
-    if (albasChanged || schedulesChanged || paydayChanged) {
-      _computeGraph();
+  void didUpdateWidget(covariant MyInfoScreen old) {
+    super.didUpdateWidget(old);
+    if (old.albas.length != widget.albas.length ||
+        old.schedules.length != widget.schedules.length) {
+      _computePoints();
     }
   }
 
-  void _computeGraph() {
-    final last4 = _stats.last4MonthsNet(
-      albas: widget.albas,
-      schedules: widget.schedules,
-      wageAt: widget.wageAt,
-      taxOf: (id) => widget.taxOf(id) ?? TaxConfig.none,
-      insuranceOf: (id) => widget.insuranceOf(id) ?? const InsuranceNone(),
-      policyOf: (id) => widget.policyOf(id) ?? const SurchargePolicy(),
-    );
+  // ─── 최근 3개월 실수령 계산 ──────────────────
+  void _computePoints() {
+    final now = DateTime.now();
+    final points = <_MonthPoint>[];
 
-    final line = (_age == null)
-        ? <double>[]
-        : _stats.synthesizeCohortAverage(last4, ageSeed: _age);
+    for (int offset = 2; offset >= 0; offset--) {
+      final dt = DateTime(now.year, now.month - offset, 1);
+      final y = dt.year;
+      final m = dt.month;
+      int monthNet = 0;
 
-    _bars = last4;
-    _line = line;
-    if (mounted) setState(() {});
+      for (final alba in widget.albas) {
+        final tax = widget.taxOf(alba.id) ?? TaxConfig.none;
+        final ins = widget.insuranceOf(alba.id) ?? const InsuranceNone();
+        final pol = widget.policyOf(alba.id) ?? const SurchargePolicy();
+
+        // ✅ 해당 알바의 스케줄만 필터링 (전체 전달하면 알바 수만큼 중복 계산됨)
+        final albaSchedules =
+            widget.schedules.where((s) => s.albaId == alba.id).toList();
+
+        final surchargeAtFn = widget.surchargeAt?.call(alba.id);
+        final summary = computeMonthlySummary(
+          alba: alba,
+          ymYear: y,
+          ymMonth: m,
+          schedules: albaSchedules,
+          tax: tax,
+          insurance: ins,
+          policy: pol,
+          surchargeAt: surchargeAtFn,
+          wageAt: widget.wageAt,
+        );
+        monthNet += summary.net;
+      }
+      points.add(_MonthPoint(year: y, month: m, net: monthNet));
+    }
+
+    if (mounted) setState(() => _points = points);
   }
 
+  // ─── helpers ─────────────────────────────────
   Future<void> _safeLogout() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -113,9 +127,11 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text(AppWords.cancel),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(AppWords.logout),
+            child: const Text(AppWords.logout,
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: Color(0xFF111827))),
           ),
         ],
       ),
@@ -130,44 +146,30 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     try {
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(AppWords.logoutDone)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text(AppWords.logoutDone)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.logoutFailed}\n$e')),
-      );
+          SnackBar(content: Text('${AppWords.logoutFailed}\n$e')));
     }
   }
 
-  bool _needRefreshForPayday(DateTime now, int payDay, DateTime? lastAt) {
-    final payday = _safePaydayDate(now.year, now.month, payDay);
-    if (now.isBefore(payday)) return false;
-    if (lastAt == null) return true;
-    return lastAt.isBefore(payday);
+  String _won(int n) {
+    if (n == 0) return '0원';
+    final man = n ~/ 10000;
+    final rest = n % 10000;
+    if (man > 0 && rest == 0) return '$man만원';
+    if (man > 0) return '$man만 ${_comma(rest)}원';
+    return '${_comma(n)}원';
   }
 
-  DateTime _safePaydayDate(int year, int month, int payDay) {
-    final last = DateUtils.getDaysInMonth(year, month);
-    final day = min(payDay, last);
-    return DateTime(year, month, day);
+  String _wonAxis(int n) {
+    if (n < 10000) return '${_comma(n)}';
+    return '${n ~/ 10000}만';
   }
 
-  void _handleRefresh() {
-    _lastRefreshedAt = DateTime.now();
-    _computeGraph();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text(AppWords.refreshDone)),
-    );
-  }
-
-  int get _currentMonthIncome => _bars.isNotEmpty ? _bars.last.amount : 0;
-
-  String _fmtDate(DateTime d) =>
-      '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
-
-  String _commaInt(int n) {
+  String _comma(int n) {
     final s = n.toString();
     final b = StringBuffer();
     for (int i = 0; i < s.length; i++) {
@@ -178,344 +180,433 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     return b.toString();
   }
 
-  // ✅ MonthlyIncomePoint가 어떤 필드를 갖고 있든 "안 터지게" 라벨 만들기
-  String _monthLabelSafe(MonthlyIncomePoint p) {
-    final d = p as dynamic;
-
-    int? y;
-    int? m;
-
-    try {
-      y = d.year as int?;
-    } catch (_) {}
-    try {
-      y ??= d.ymYear as int?;
-    } catch (_) {}
-
-    try {
-      m = d.month as int?;
-    } catch (_) {}
-    try {
-      m ??= d.ymMonth as int?;
-    } catch (_) {}
-
-    try {
-      final DateTime dt = d.monthStart as DateTime;
-      y ??= dt.year;
-      m ??= dt.month;
-    } catch (_) {}
-
-    if (y != null && m != null) return '$m월';
-    return '';
-  }
-
+  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final needRefresh =
-        _needRefreshForPayday(now, widget.payDay, _lastRefreshedAt);
-
     return Scaffold(
-      appBar: null,
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (needRefresh) _buildRefreshBanner(now),
-            _buildGoalCard(),
-            const SizedBox(height: 16),
-            _buildGraphCard(),
-            const SizedBox(height: 16),
-            _buildPolicyCard(),
-            const SizedBox(height: 16),
-            _buildFaqSupportCard(),
-            const SizedBox(height: 16),
-            _buildDangerZoneCard(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRefreshBanner(DateTime now) {
-    final payday = _safePaydayDate(now.year, now.month, widget.payDay);
-    return Card(
-      color: Colors.amber.shade50,
-      child: ListTile(
-        leading: const Icon(Icons.update, color: Colors.orange),
-        title: Text(
-          AppWords.refreshNeededTitle,
+      backgroundColor: const Color(0xFFF8F7FF),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8F7FF),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        automaticallyImplyLeading: false,
+        centerTitle: true,
+        title: const Text(
+          '내 정보',
           style: TextStyle(
-            color: Colors.orange.shade900,
-            fontWeight: FontWeight.bold,
-          ),
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+              color: Color(0xFF111827)),
         ),
-        subtitle: Text('${AppWords.payDayLabel}: ${_fmtDate(payday)}'),
-        trailing: TextButton(
-          onPressed: _handleRefresh,
-          child: const Text(AppWords.refresh),
-        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [
+          _buildIncomeCard(),
+          const SizedBox(height: 16),
+          _buildPolicyCard(),
+          const SizedBox(height: 12),
+          _buildFaqSupportCard(),
+          const SizedBox(height: 12),
+          _buildDangerZoneCard(),
+        ],
       ),
     );
   }
 
-  Widget _buildGoalCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('이번 달 목표', style: Theme.of(context).textTheme.titleMedium),
+  // ─── ① 3개월 실수령 꺾은선 카드 ─────────────
+  Widget _buildIncomeCard() {
+    final theme = Theme.of(context);
+    final hasData = _points.any((p) => p.net > 0);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.07),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 헤더
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED).withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.trending_up_rounded,
+                    color: Color(0xFF7C3AED), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('3개월 실수령',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF111827))),
+                  Text('세금·보험 공제 후',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: const Color(0xFF9CA3AF))),
+                ],
+              ),
+              const Spacer(),
+              if (_points.isNotEmpty)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('이번 달',
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(color: const Color(0xFF9CA3AF))),
+                    Text(
+                      _won(_points.last.net),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF7C3AED)),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // 그래프
+          if (!hasData)
+            SizedBox(
+              height: 140,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.show_chart_rounded,
+                      size: 36,
+                      color: const Color(0xFF9CA3AF).withOpacity(0.4)),
+                  const SizedBox(height: 8),
+                  Text('아직 기록된 근무가 없어요',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: const Color(0xFF9CA3AF))),
+                ],
+              ),
+            )
+          else
+            SizedBox(height: 180, child: _buildLineChart(theme)),
+
+          // X축 월 레이블
+          if (hasData) ...[
             const SizedBox(height: 10),
             Row(
               children: [
+                const SizedBox(width: 44), // leftTitles reserved size
                 Expanded(
-                  child: Text(
-                    '${_commaInt(_monthlyGoal)}원',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: _points.map((p) {
+                      final isLast = p == _points.last;
+                      return Text(
+                        p.label,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: isLast
+                              ? const Color(0xFF7C3AED)
+                              : const Color(0xFF6B7280),
+                          fontWeight:
+                              isLast ? FontWeight.w800 : FontWeight.w500,
                         ),
+                      );
+                    }).toList(),
                   ),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    final ctrl = TextEditingController(text: '$_monthlyGoal');
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('목표 금액 변경'),
-                        content: TextField(
-                          controller: ctrl,
-                          keyboardType: TextInputType.number,
-                          decoration:
-                              const InputDecoration(hintText: '예: 1000000'),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text(AppWords.cancel),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text(AppWords.ok),
-                          ),
-                        ],
-                      ),
-                    );
-
-                    if (ok == true) {
-                      final v = int.tryParse(ctrl.text.trim());
-                      if (v != null && v >= 0) {
-                        setState(() => _monthlyGoal = v);
-                      }
-                    }
-                  },
-                  child: const Text('변경'),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              '이번 달 현재: ${_commaInt(_currentMonthIncome)}원',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildGraphCard() {
-    final theme = Theme.of(context);
+  Widget _buildLineChart(ThemeData theme) {
+    if (_points.isEmpty) return const SizedBox.shrink();
 
-    if (_bars.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Text(
-            '표시할 데이터가 없어요.',
-            style: theme.textTheme.bodyMedium,
+    final maxVal = _points.map((p) => p.net).fold<int>(0, max);
+    final safeMax = maxVal <= 0 ? 100000.0 : (maxVal * 1.35);
+    final interval = (safeMax / 3).ceilToDouble();
+
+    final spots = _points
+        .asMap()
+        .entries
+        .map((e) => FlSpot(e.key.toDouble(), e.value.net.toDouble()))
+        .toList();
+
+    return LineChart(
+      LineChartData(
+        minY: 0,
+        maxY: safeMax,
+        minX: 0,
+        maxX: 2,
+        clipData: const FlClipData.all(),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: interval,
+          getDrawingHorizontalLine: (_) => const FlLine(
+            color: Color(0xFFE5E7EB),
+            strokeWidth: 1,
           ),
         ),
-      );
-    }
-
-    final maxY =
-        _bars.map((e) => e.amount).fold<int>(0, (p, c) => max(p, c)).toDouble();
-    final safeMaxY = maxY <= 0 ? 1.0 : (maxY * 1.25);
-
-    final groups = <BarChartGroupData>[];
-    for (int i = 0; i < _bars.length; i++) {
-      final amt = _bars[i].amount.toDouble();
-      groups.add(
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: amt,
-              width: 18,
-              borderRadius: BorderRadius.circular(6),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 44,
+              interval: interval,
+              getTitlesWidget: (val, meta) {
+                if (val <= 0 || val > safeMax + 1) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Text(
+                    _wonAxis(val.round()),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: const Color(0xFF9CA3AF)),
+                    textAlign: TextAlign.right,
+                  ),
+                );
+              },
             ),
-          ],
+          ),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-      );
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('최근 4개월 실수령', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 220,
-              child: BarChart(
-                BarChartData(
-                  maxY: safeMaxY,
-                  barGroups: groups,
-                  gridData: const FlGridData(show: true),
-                  borderData: FlBorderData(show: false),
-                  titlesData: FlTitlesData(
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          final i = value.toInt();
-                          if (i < 0 || i >= _bars.length)
-                            return const SizedBox.shrink();
-                          final label = _monthLabelSafe(_bars[i]);
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              label.isEmpty ? '${i + 1}' : label,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+        lineTouchData: LineTouchData(
+          handleBuiltInTouches: true,
+          touchCallback: (event, response) {
+            if (!mounted) return;
+            setState(() {
+              if (response?.lineBarSpots != null &&
+                  response!.lineBarSpots!.isNotEmpty) {
+                _touchedIndex = response.lineBarSpots!.first.spotIndex;
+              } else {
+                _touchedIndex = -1;
+              }
+            });
+          },
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipColor: (_) => const Color(0xFF7C3AED),
+            tooltipRoundedRadius: 10,
+            getTooltipItems: (touchedSpots) {
+              return touchedSpots.map((s) {
+                final idx = s.spotIndex;
+                if (idx < 0 || idx >= _points.length) {
+                  return null;
+                }
+                final p = _points[idx];
+                return LineTooltipItem(
+                  '${p.label}\n${_won(p.net)}',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
                   ),
-                  barTouchData: BarTouchData(
-                    enabled: true,
-                    touchTooltipData: BarTouchTooltipData(
-                      // ✅ tooltipBgColor는 네 버전에 없어서 제거
-                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        final i = group.x.toInt();
-                        final label = (i >= 0 && i < _bars.length)
-                            ? _monthLabelSafe(_bars[i])
-                            : '';
-                        final v = rod.toY.round();
-                        return BarTooltipItem(
-                          '${label.isEmpty ? '' : '$label '}${_commaInt(v)}원',
-                          theme.textTheme.bodySmall ?? const TextStyle(),
-                        );
-                      },
-                    ),
-                  ),
-                ),
+                );
+              }).toList();
+            },
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.4,
+            color: const Color(0xFF7C3AED),
+            barWidth: 3.5,
+            isStrokeCapRound: true,
+            shadow: const Shadow(
+              color: Color(0x337C3AED),
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            ),
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, pct, bar, idx) {
+                final touched = idx == _touchedIndex;
+                final isLast = idx == spots.length - 1;
+                return FlDotCirclePainter(
+                  radius: touched ? 8 : (isLast ? 6 : 4.5),
+                  color: touched
+                      ? const Color(0xFF7C3AED)
+                      : (isLast ? const Color(0xFF7C3AED) : Colors.white),
+                  strokeWidth: 2.5,
+                  strokeColor: const Color(0xFF7C3AED),
+                );
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF7C3AED).withOpacity(0.20),
+                  const Color(0xFF7C3AED).withOpacity(0.05),
+                  const Color(0xFF7C3AED).withOpacity(0.0),
+                ],
+                stops: const [0.0, 0.6, 1.0],
               ),
             ),
-            if (_line.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  '※ 비슷한 나이 평균선은 현재 버전에선 숫자만 계산해두고, 화면 표시(선)는 다음 단계에서 추가할 수 있어요.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
-                  ),
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
+  // ─── ② 약관 카드 ─────────────────────────────
   Widget _buildPolicyCard() {
-    return Card(
-      child: Column(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.description),
-            title: const Text(AppWords.terms),
-            onTap: widget.onOpenTerms,
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip),
-            title: const Text(AppWords.privacy),
-            onTap: widget.onOpenPrivacy,
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.receipt_long),
-            title: const Text(AppWords.openSourceLicense),
-            onTap: () => showLicensePage(
-              context: context,
-              applicationName: AppWords.appName,
-            ),
-            trailing: const Icon(Icons.chevron_right),
-          ),
-        ],
+    return _InfoCard(children: [
+      _InfoTile(
+          icon: Icons.description_outlined,
+          label: AppWords.terms,
+          onTap: widget.onOpenTerms),
+      const Divider(height: 1, indent: 52),
+      _InfoTile(
+          icon: Icons.privacy_tip_outlined,
+          label: AppWords.privacy,
+          onTap: widget.onOpenPrivacy),
+      const Divider(height: 1, indent: 52),
+      _InfoTile(
+        icon: Icons.receipt_long_outlined,
+        label: AppWords.openSourceLicense,
+        onTap: () => showLicensePage(
+            context: context, applicationName: AppWords.appName),
       ),
-    );
+    ]);
   }
 
+  // ─── ③ 문의하기 카드 ──────────────────────────
   Widget _buildFaqSupportCard() {
-    return Card(
-      child: Column(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.help_center),
-            title: const Text(AppWords.faq),
-            onTap: widget.onOpenFaq,
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.support_agent),
-            title: const Text(AppWords.support),
-            onTap: widget.onOpenSupport,
-            trailing: const Icon(Icons.chevron_right),
+    return _InfoCard(children: [
+      _InfoTile(
+          icon: Icons.support_agent_outlined,
+          label: AppWords.support,
+          onTap: widget.onOpenSupport),
+    ]);
+  }
+
+  // ─── ④ 위험 구역 카드 ────────────────────────
+  Widget _buildDangerZoneCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFEE2E2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
+      child: Column(children: [
+        _InfoTile(
+          icon: Icons.logout_rounded,
+          label: AppWords.logout,
+          iconColor: const Color(0xFFF43F5E),
+          labelColor: const Color(0xFFF43F5E),
+          onTap: _safeLogout,
+        ),
+        const Divider(height: 1, indent: 52),
+        _InfoTile(
+          icon: Icons.delete_forever_rounded,
+          label: AppWords.deleteAccount,
+          iconColor: const Color(0xFFF43F5E),
+          labelColor: const Color(0xFFF43F5E),
+          onTap: widget.onDeleteAccount,
+        ),
+      ]),
     );
   }
+}
 
-  Widget _buildDangerZoneCard() {
-    return Card(
-      color: Colors.red.shade50,
-      child: Column(
-        children: [
-          ListTile(
-            leading: Icon(Icons.logout, color: Colors.red.shade700),
-            title: const Text(AppWords.logout),
-            onTap: _safeLogout,
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: Icon(Icons.delete_forever, color: Colors.red.shade700),
-            title: const Text(AppWords.deleteAccount),
-            onTap: widget.onDeleteAccount,
-            trailing: const Icon(Icons.chevron_right),
-          ),
+// ─────────────────────────────────────────────
+// 공용 위젯
+// ─────────────────────────────────────────────
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4)),
         ],
+      ),
+      child: Column(children: children),
+    );
+  }
+}
+
+class _InfoTile extends StatelessWidget {
+  const _InfoTile({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.iconColor,
+    this.labelColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color? iconColor;
+  final Color? labelColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ic = iconColor ?? const Color(0xFF6B7280);
+    final lc = labelColor ?? const Color(0xFF111827);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: ic),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(label,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600, color: lc)),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 20, color: ic.withOpacity(0.4)),
+          ],
+        ),
       ),
     );
   }

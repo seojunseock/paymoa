@@ -1,4 +1,5 @@
 // lib/screens/payroll_policy_sheet.dart
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../common/app_words.dart';
@@ -14,31 +15,20 @@ Future<PayrollPolicy?> showPayrollPolicySheet({
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
+    backgroundColor: const Color(0xFFF8F7FF),
     builder: (ctx) {
-      return _PayrollPolicySheet(
-        role: role,
-        initialPolicy: initial,
-      );
+      return _PayrollPolicySheet(role: role, initialPolicy: initial);
     },
   );
 }
 
-/// ✅ 우리가 확정한 3정책만 노출
-/// 1) 한 달(1일~말일)로 묶기
-/// 2) 매달 같은 날 기준으로 묶기 (예: 16일~다음달 15일)
-/// 3) 하루씩 따로 계산하기(일급)
-enum _MvpPayrollKind {
-  calendarMonth,
-  anchorMonth,
-  shortTermDaily,
-}
+enum _MvpPayrollKind { calendarMonth, anchorMonth, shortTermDaily }
 
 class _PayrollPolicySheet extends StatefulWidget {
   const _PayrollPolicySheet({
     required this.role,
     required this.initialPolicy,
   });
-
   final PayrollViewerRole role;
   final PayrollPolicy initialPolicy;
 
@@ -48,27 +38,17 @@ class _PayrollPolicySheet extends StatefulWidget {
 
 class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
   final _engine = const PayrollEngine();
-  int _step = 0;
-
   late PayrollPolicy _policy;
-
-  // step2: 마감 후 N일
-  final _afterDaysCtrl = TextEditingController(text: '0');
-
-  // step1: 3정책 선택
   late _MvpPayrollKind _kind;
+  final _afterDaysCtrl = TextEditingController(text: '0');
 
   @override
   void initState() {
     super.initState();
-
     _policy = _normalizeToMvp(widget.initialPolicy);
     _kind = _kindFromPolicy(_policy);
-
     if (_policy.payRule.type == PayDateRuleType.afterEndPlusDays) {
       _afterDaysCtrl.text = '${_policy.payRule.plusDays ?? 0}';
-    } else {
-      _afterDaysCtrl.text = '0';
     }
   }
 
@@ -78,48 +58,39 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
     super.dispose();
   }
 
-  List<PeriodPayPreview> get _previews =>
-      _engine.previewNext(policy: _policy, count: 3);
+  /* ─── 로직 ─── */
+  PeriodPayPreview get _preview =>
+      _engine.previewNext(policy: _policy, count: 1).first;
 
   PayrollPolicy _normalizeToMvp(PayrollPolicy p) {
     final now = _dateOnly(DateTime.now());
-
-    // 일급이면 그대로
-    if (p.cycle == PayCycleType.daily) {
+    if (p.cycle == PayCycleType.daily)
       return p.copyWith(startFrom: _dateOnly(p.startFrom));
-    }
-
-    // 월급이면 monthlyStartDay 보정
     if (p.cycle == PayCycleType.monthly) {
-      final msd = (p.monthlyStartDay ?? 1).clamp(1, 31);
       return p.copyWith(
-        startFrom: _dateOnly(p.startFrom),
-        monthlyStartDay: msd,
-      );
+          startFrom: _dateOnly(p.startFrom),
+          monthlyStartDay: (p.monthlyStartDay ?? 1).clamp(1, 31));
     }
-
-    // 그 외는 MVP 기본값으로 통일
     return PayrollPolicy(
       cycle: PayCycleType.monthly,
       startFrom: now,
       monthlyStartDay: 1,
-      payRule: p.payRule,
+      payRule: const PayDateRule.nextMonthlyDay(25),
     );
   }
 
   _MvpPayrollKind _kindFromPolicy(PayrollPolicy p) {
     if (p.cycle == PayCycleType.daily) return _MvpPayrollKind.shortTermDaily;
-
-    final msd = (p.monthlyStartDay ?? 1).clamp(1, 31);
-    if (msd == 1) return _MvpPayrollKind.calendarMonth;
-    return _MvpPayrollKind.anchorMonth;
+    final s = p.monthlyStartDay ?? 1;
+    return (s == 1)
+        ? _MvpPayrollKind.calendarMonth
+        : _MvpPayrollKind.anchorMonth;
   }
 
   void _applyKind(_MvpPayrollKind k) {
+    final now = _dateOnly(DateTime.now());
     setState(() {
       _kind = k;
-      final now = _dateOnly(DateTime.now());
-
       switch (k) {
         case _MvpPayrollKind.calendarMonth:
           _policy = PayrollPolicy(
@@ -128,380 +99,413 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
             monthlyStartDay: 1,
             payRule: _policy.payRule,
           );
-          break;
-
         case _MvpPayrollKind.anchorMonth:
-          // 기준 시작일은 1일이면 "캘린더월"이랑 겹치니까 기본 16일로 유도
-          final cur = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
-          final anchorStartDay = (cur == 1) ? 16 : cur;
+          final s = (_policy.monthlyStartDay ?? 16) == 1
+              ? 16
+              : (_policy.monthlyStartDay ?? 16);
           _policy = PayrollPolicy(
             cycle: PayCycleType.monthly,
             startFrom: now,
-            monthlyStartDay: anchorStartDay,
+            monthlyStartDay: s,
             payRule: _policy.payRule,
           );
-          break;
-
         case _MvpPayrollKind.shortTermDaily:
           _policy = PayrollPolicy(
             cycle: PayCycleType.daily,
             startFrom: now,
             payRule: _policy.payRule,
           );
-          break;
       }
     });
   }
 
-  void _setPayRule(PayDateRule rule) {
-    setState(() => _policy = _policy.copyWith(payRule: rule));
-  }
+  void _setPayRule(PayDateRule r) =>
+      setState(() => _policy = _policy.copyWith(payRule: r));
 
   Future<void> _pickAnchorStartDay() async {
-    final current = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
-    final picked = await _pickDay1to31(
-      title: AppWords.policyAnchorPickTitle,
-      initialDay: current,
+    final cur = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
+    int tmp = cur;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SizedBox(
+        height: 280,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Row(children: [
+                const Text('시작일 선택',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _policy = _policy.copyWith(
+                        monthlyStartDay: tmp,
+                        startFrom: _dateOnly(DateTime.now()),
+                      );
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('확인'),
+                ),
+              ]),
+            ),
+            Expanded(
+              child: CupertinoPicker(
+                itemExtent: 44,
+                scrollController:
+                    FixedExtentScrollController(initialItem: cur - 1),
+                onSelectedItemChanged: (i) => tmp = i + 1,
+                children: List.generate(
+                    31, (i) => Center(child: Text('매달 ${i + 1}일'))),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-    if (picked == null) return;
+  }
 
-    setState(() {
-      // 1일은 캘린더월과 구분이 애매해져서 2일 이상으로 보정
-      final safe = (picked == 1) ? 2 : picked;
-      _policy = _policy.copyWith(monthlyStartDay: safe);
-    });
+  Future<void> _pickAfterDays(BuildContext context) async {
+    final cur = (_policy.payRule.plusDays ?? 0).clamp(0, 60);
+    int tmp = cur;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SizedBox(
+        height: 280,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Row(children: [
+                const Text('며칠 뒤에 받을까요?',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    _setPayRule(PayDateRule.afterEndPlusDays(tmp));
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('확인',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF7C3AED))),
+                ),
+              ]),
+            ),
+            Expanded(
+              child: CupertinoPicker(
+                itemExtent: 44,
+                scrollController: FixedExtentScrollController(initialItem: cur),
+                onSelectedItemChanged: (i) => tmp = i,
+                children: List.generate(
+                    61,
+                    (i) => Center(
+                          child: Text(
+                            i == 0 ? '마감일 당일' : '$i일 뒤',
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                        )),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _pickMonthlyPayDay() async {
-    final current = (_policy.payRule.monthlyDay ?? 10).clamp(1, 31);
-    final picked = await _pickDay1to31(
-      title: AppWords.policyPickMonthlyPayDayTitle,
-      initialDay: current,
-    );
-    if (picked == null) return;
-    _setPayRule(PayDateRule.nextMonthlyDay(picked));
-  }
-
-  Future<int?> _pickDay1to31({
-    required String title,
-    required int initialDay,
-  }) async {
-    int temp = initialDay;
-
-    return showModalBottomSheet<int>(
+    final cur = (_policy.payRule.monthlyDay ?? 25).clamp(1, 31);
+    int tmp = cur;
+    await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: SizedBox(
-            height: 320,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text(AppWords.close),
-                    ),
-                    const Spacer(),
-                    Text(title, style: Theme.of(ctx).textTheme.titleMedium),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, temp),
-                      child: const Text(AppWords.select),
-                    ),
-                  ],
+      builder: (ctx) => SizedBox(
+        height: 280,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Row(children: [
+                const Text('급여일 선택',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    _setPayRule(PayDateRule.nextMonthlyDay(tmp));
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('확인'),
                 ),
-                Expanded(
-                  child: ListWheelScrollView.useDelegate(
-                    itemExtent: 44,
-                    physics: const FixedExtentScrollPhysics(),
-                    controller: FixedExtentScrollController(
-                        initialItem: initialDay - 1),
-                    onSelectedItemChanged: (i) => temp = i + 1,
-                    childDelegate: ListWheelChildBuilderDelegate(
-                      childCount: 31,
-                      builder: (_, i) => Center(
-                        child: Text(
-                          '${i + 1}${AppWords.dayUnit}',
-                          style: const TextStyle(fontSize: 18),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ]),
             ),
-          ),
-        );
-      },
+            Expanded(
+              child: CupertinoPicker(
+                itemExtent: 44,
+                scrollController:
+                    FixedExtentScrollController(initialItem: cur - 1),
+                onSelectedItemChanged: (i) => tmp = i + 1,
+                children: List.generate(
+                    31, (i) => Center(child: Text('매달 ${i + 1}일'))),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   String _fmtDate(DateTime d) =>
       '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
 
-  String _kindDesc() {
-    switch (_kind) {
-      case _MvpPayrollKind.calendarMonth:
-        return '매달 1일~말일까지 일한 걸 한 번에 계산해요.';
-      case _MvpPayrollKind.anchorMonth:
-        final s = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
-        final end = (s == 1) ? 31 : (s - 1);
-        return '매달 $s일부터 다음달 $end일까지를 한 번으로 계산해요.';
-      case _MvpPayrollKind.shortTermDaily:
-        return '일한 하루가 바로 계산 단위예요.';
-    }
+  // anchor 기준일 → 마감일 계산
+  String _anchorDesc(int startDay) {
+    final endDay = startDay == 1 ? '말일' : '${startDay - 1}일';
+    return '매달 ${startDay}일 ~ 다음달 $endDay';
   }
 
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  /* ─── UI ─── */
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final preview = _preview;
+    final anchorDay = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
 
     return SafeArea(
       child: Padding(
         padding:
             EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.86,
+          height: MediaQuery.of(context).size.height * 0.85,
           child: Column(
             children: [
+              // ── 헤더
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 6, 12, 10),
                 child: Row(
                   children: [
-                    Text(
-                      AppWords.payrollPolicyTitle,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
+                    const Text('급여 방식 설정',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF111827))),
                     const Spacer(),
-                    TextButton(
+                    FilledButton(
                       onPressed: () => Navigator.pop(context, _policy),
-                      child: const Text(AppWords.done),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C3AED),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 9),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero,
+                      ),
+                      child: const Text('완료',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white)),
                     ),
                   ],
                 ),
               ),
+              Container(height: 1, color: const Color(0xFFF0F0F5)),
+
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
                   children: [
-                    Row(
-                      children: [
-                        _StepChip(label: AppWords.step1, on: _step == 0),
-                        const SizedBox(width: 8),
-                        _StepChip(label: AppWords.step2, on: _step == 1),
-                        const SizedBox(width: 8),
-                        _StepChip(label: AppWords.step3, on: _step == 2),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
+                    // ── 섹션 1: 계산 기간
+                    const _SectionTitle(text: '일한 기간을 어떻게 묶을까요?'),
+                    const SizedBox(height: 10),
 
-                    // STEP 0
-                    if (_step == 0)
-                      _Card(
-                        title: AppWords.policyBundleQuestion,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _radioKind(
-                              _MvpPayrollKind.calendarMonth,
-                              AppWords.policyKindCalendarMonth,
-                              subtitle: AppWords.policyKindCalendarMonthSub,
-                            ),
-                            _radioKind(
-                              _MvpPayrollKind.anchorMonth,
-                              AppWords.policyKindAnchorMonth,
-                              subtitle: AppWords.policyKindAnchorMonthSub,
-                            ),
-                            _radioKind(
-                              _MvpPayrollKind.shortTermDaily,
-                              AppWords.policyKindDaily,
-                              subtitle: AppWords.policyKindDailySub,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _kindDesc(),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurface
-                                    .withOpacity(0.65),
+                    _RadioTile(
+                      label: '한 달 묶기',
+                      desc: '매달 1일 ~ 말일',
+                      selected: _kind == _MvpPayrollKind.calendarMonth,
+                      onTap: () => _applyKind(_MvpPayrollKind.calendarMonth),
+                    ),
+                    const SizedBox(height: 6),
+                    _RadioTile(
+                      label: '날짜 기준으로 묶기',
+                      desc: _kind == _MvpPayrollKind.anchorMonth
+                          ? _anchorDesc(anchorDay)
+                          : '예: 16일 ~ 다음달 15일',
+                      selected: _kind == _MvpPayrollKind.anchorMonth,
+                      onTap: () => _applyKind(_MvpPayrollKind.anchorMonth),
+                      // 선택됐을 때만 날짜 변경 버튼 표시
+                      trailing: _kind == _MvpPayrollKind.anchorMonth
+                          ? GestureDetector(
+                              onTap: _pickAnchorStartDay,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF7C3AED),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '${anchorDay}일 시작',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white),
+                                ),
                               ),
-                            ),
-                          ],
+                            )
+                          : null,
+                    ),
+                    const SizedBox(height: 6),
+                    _RadioTile(
+                      label: '하루씩 계산 (일급)',
+                      desc: '근무한 날마다 따로 계산해요',
+                      selected: _kind == _MvpPayrollKind.shortTermDaily,
+                      onTap: () => _applyKind(_MvpPayrollKind.shortTermDaily),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // ── 섹션 2: 급여일
+                    const _SectionTitle(text: '급여는 언제 주나요?'),
+                    const SizedBox(height: 10),
+
+                    _RadioTile(
+                      label: '마감일에 바로 지급',
+                      desc: '계산 기간 마지막 날에 받아요',
+                      selected: _policy.payRule.type ==
+                          PayDateRuleType.samePeriodEndDay,
+                      onTap: () =>
+                          _setPayRule(const PayDateRule.samePeriodEndDay()),
+                    ),
+                    const SizedBox(height: 6),
+
+                    // 마감 후 N일
+                    _RadioTile(
+                      label: '마감 후 며칠 뒤',
+                      desc: '마감일로부터 며칠 후에 받아요',
+                      selected: _policy.payRule.type ==
+                          PayDateRuleType.afterEndPlusDays,
+                      onTap: () {
+                        final n = int.tryParse(_afterDaysCtrl.text.trim()) ?? 0;
+                        _setPayRule(
+                            PayDateRule.afterEndPlusDays(n.clamp(0, 365)));
+                      },
+                    ),
+                    // 마감 후 N일 선택 시 아이폰 스크롤 피커
+                    if (_policy.payRule.type ==
+                        PayDateRuleType.afterEndPlusDays) ...[
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => _pickAfterDays(context),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F3FF),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE9D5FF)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text('마감 후 ',
+                                  style: TextStyle(
+                                      fontSize: 15, color: Color(0xFF6B7280))),
+                              Text(
+                                '${_policy.payRule.plusDays ?? 0}',
+                                style: const TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF7C3AED)),
+                              ),
+                              const Text(' 일 뒤에 받아요',
+                                  style: TextStyle(
+                                      fontSize: 15, color: Color(0xFF6B7280))),
+                            ],
+                          ),
                         ),
                       ),
+                    ],
+                    const SizedBox(height: 6),
 
-                    // STEP 1
-                    if (_step == 1)
-                      _Card(
-                        title: '기준일 선택(이 방식일 때만)',
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_kind == _MvpPayrollKind.anchorMonth) ...[
-                              Row(
-                                children: [
-                                  Expanded(
+                    // 매달 N일
+                    _RadioTile(
+                      label: '매달 정해진 날',
+                      desc: '예: 매달 25일',
+                      selected: _policy.payRule.type ==
+                          PayDateRuleType.nextMonthlyDay,
+                      onTap: () {
+                        final day =
+                            (_policy.payRule.monthlyDay ?? 25).clamp(1, 31);
+                        _setPayRule(PayDateRule.nextMonthlyDay(day));
+                      },
+                      trailing:
+                          _policy.payRule.type == PayDateRuleType.nextMonthlyDay
+                              ? GestureDetector(
+                                  onTap: _pickMonthlyPayDay,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF7C3AED),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                     child: Text(
-                                      '기준 시작일: ${(_policy.monthlyStartDay ?? 16).clamp(1, 31)}${AppWords.dayUnit}',
-                                      style: theme.textTheme.bodyMedium,
+                                      '${_policy.payRule.monthlyDay ?? 25}일',
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white),
                                     ),
                                   ),
-                                  TextButton(
-                                    onPressed: _pickAnchorStartDay,
-                                    child: const Text(AppWords.change),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '예: 16일로 하면 1/16~2/15가 한 묶음이에요.',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.65),
-                                ),
-                              ),
-                            ] else ...[
-                              Text(
-                                '이 방식이 아닐 때는 자동으로 정해져요.',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.65),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-
-                    // STEP 2
-                    if (_step == 2)
-                      _Card(
-                        title: AppWords.policyPayWhenTitle,
-                        child: Column(
-                          children: [
-                            _radioPayRule(
-                              PayDateRuleType.samePeriodEndDay,
-                              AppWords.policyPaySameEnd,
-                              onSelect: () => _setPayRule(
-                                const PayDateRule.samePeriodEndDay(),
-                              ),
-                            ),
-                            _radioPayRule(
-                              PayDateRuleType.afterEndPlusDays,
-                              AppWords.policyPayAfterDays,
-                              onSelect: () {
-                                final n =
-                                    int.tryParse(_afterDaysCtrl.text.trim()) ??
-                                        0;
-                                _setPayRule(PayDateRule.afterEndPlusDays(
-                                    n.clamp(0, 365)));
-                              },
-                              trailing: SizedBox(
-                                width: 110,
-                                child: TextField(
-                                  controller: _afterDaysCtrl,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    isDense: true,
-                                    hintText: '예: 3',
-                                  ),
-                                  onChanged: (_) {
-                                    if (_policy.payRule.type !=
-                                        PayDateRuleType.afterEndPlusDays)
-                                      return;
-                                    final n = int.tryParse(
-                                            _afterDaysCtrl.text.trim()) ??
-                                        0;
-                                    _setPayRule(PayDateRule.afterEndPlusDays(
-                                        n.clamp(0, 365)));
-                                  },
-                                ),
-                              ),
-                            ),
-                            _radioPayRule(
-                              PayDateRuleType.nextMonthlyDay,
-                              AppWords.policyPayMonthlyDay,
-                              onSelect: () {
-                                final day = (_policy.payRule.monthlyDay ?? 10)
-                                    .clamp(1, 31);
-                                _setPayRule(PayDateRule.nextMonthlyDay(day));
-                              },
-                              trailing: TextButton(
-                                onPressed: _pickMonthlyPayDay,
-                                child: const Text(AppWords.policyPickDate),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '예시)\n'
-                              '마감이 2/15이고, 매달 25일 지급 → 2/25에 지급\n'
-                              '마감이 2/15이고, 매달 10일 지급 → 3/10에 지급',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurface
-                                    .withOpacity(0.65),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    const SizedBox(height: 12),
-
-                    // PREVIEW
-                    _Card(
-                      title: AppWords.previewTitle,
-                      child: Column(
-                        children: _previews.map((p) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '${_fmtDate(p.period.start)} ~ ${_fmtDate(p.period.end)}',
-                                  ),
-                                ),
-                                Text(
-                                  '지급일: ${_fmtDate(p.payDate)}',
-                                  style: theme.textTheme.bodyMedium
-                                      ?.copyWith(fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
+                                )
+                              : null,
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 24),
 
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _step == 0
-                                ? null
-                                : () => setState(() => _step--),
-                            child: const Text(AppWords.back),
+                    // ── 미리보기 (1개)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF7C3AED).withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: const Color(0xFF7C3AED).withOpacity(0.15)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded,
+                              size: 15, color: Color(0xFF7C3AED)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${_fmtDate(preview.period.start)} ~ ${_fmtDate(preview.period.end)}',
+                              style: const TextStyle(
+                                  fontSize: 13, color: Color(0xFF6B7280)),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () {
-                              if (_step < 2) {
-                                setState(() => _step++);
-                              } else {
-                                Navigator.pop(context, _policy);
-                              }
-                            },
-                            child:
-                                Text(_step < 2 ? AppWords.next : AppWords.done),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 9, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF7C3AED),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '${_fmtDate(preview.payDate)} 지급',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -512,97 +516,153 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
       ),
     );
   }
-
-  Widget _radioKind(
-    _MvpPayrollKind v,
-    String label, {
-    String? subtitle,
-  }) {
-    final on = _kind == v;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Radio<bool>(
-        value: true,
-        groupValue: on,
-        onChanged: (_) => _applyKind(v),
-      ),
-      title: Text(label),
-      subtitle: subtitle == null ? null : Text(subtitle),
-      onTap: () => _applyKind(v),
-      dense: true,
-    );
-  }
-
-  Widget _radioPayRule(
-    PayDateRuleType type,
-    String label, {
-    required VoidCallback onSelect,
-    Widget? trailing,
-  }) {
-    final on = _policy.payRule.type == type;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Radio<bool>(
-        value: true,
-        groupValue: on,
-        onChanged: (_) => onSelect(),
-      ),
-      title: Text(label),
-      trailing: trailing,
-      onTap: onSelect,
-      dense: true,
-    );
-  }
-
-  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 }
 
-class _StepChip extends StatelessWidget {
-  const _StepChip({required this.label, required this.on});
+/* ────────────── 공통 컴포넌트 ────────────── */
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: Color(0xFF374151),
+      ),
+    );
+  }
+}
+
+// 라디오 행 (이모지/아이콘 없음, 깔끔)
+class _RadioTile extends StatelessWidget {
+  const _RadioTile({
+    required this.label,
+    this.desc,
+    required this.selected,
+    required this.onTap,
+    this.trailing,
+  });
   final String label;
-  final bool on;
+  final String? desc;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  static const _purple = Color(0xFF7C3AED);
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: on
-            ? theme.colorScheme.primary.withOpacity(0.14)
-            : theme.colorScheme.surfaceVariant.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style:
-            theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 130),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected ? _purple.withOpacity(0.05) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color:
+                selected ? _purple.withOpacity(0.45) : const Color(0xFFE5E7EB),
+            width: selected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            // 커스텀 라디오
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? _purple : const Color(0xFFD1D5DB),
+                  width: selected ? 6.0 : 2.0,
+                ),
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? _purple : const Color(0xFF111827),
+                      )),
+                ],
+              ),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 8),
+              trailing!,
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.title, required this.child});
-  final String title;
-  final Widget child;
+// 확장 입력칸 (마감 후 N일 등)
+class _ExpandedInput extends StatelessWidget {
+  const _ExpandedInput({
+    required this.prefix,
+    required this.suffix,
+    required this.controller,
+    required this.onChanged,
+    this.keyboardType,
+  });
+  final String prefix;
+  final String suffix;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+        color: const Color(0xFFF8F7FF),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF7C3AED).withOpacity(0.20)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(title, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 10),
-          child,
+          Text(prefix,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              keyboardType: keyboardType,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF7C3AED),
+                letterSpacing: -0.5,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onChanged: onChanged,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(suffix,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
         ],
       ),
     );

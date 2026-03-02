@@ -5,6 +5,7 @@ import '../payroll/payroll.dart';
 import '../policies/policies.dart' as pol;
 import '../policies/policy_mapper.dart' as pm;
 import '../payroll/payroll_policy_mapper.dart' show payrollPolicyFromMap;
+import 'policy_history.dart';
 
 class Store {
   final String id;
@@ -25,6 +26,9 @@ class Store {
   /// ✅ Firestore의 policy 맵 (tax/insurance/surcharge/payrollPolicy 등)
   final Map<String, dynamic>? policy;
 
+  /// ✅ 정책 변경 이력 (날짜별 가산정책 계산용)
+  final PolicyHistory policyHistory;
+
   const Store({
     required this.id,
     required this.ownerUid,
@@ -36,6 +40,7 @@ class Store {
     this.payDay,
     this.storeCode,
     this.policy,
+    this.policyHistory = const PolicyHistory.empty_(),
   });
 
   // ─────────────────────────────────────────────
@@ -132,6 +137,7 @@ class Store {
       payDay: (data['payDay'] as num?)?.toInt(),
       storeCode: data['storeCode'] as String?,
       policy: (data['policy'] as Map?)?.cast<String, dynamic>(),
+      policyHistory: PolicyHistory.fromList(data['policyHistory']),
     );
   }
 
@@ -143,6 +149,10 @@ class Store {
         if (payDay != null) 'payDay': payDay,
         if (storeCode != null) 'storeCode': storeCode,
         if (policy != null) 'policy': policy,
+        // ✅ 정책 이력 저장 (매장 기본 시급 날짜 기반 계산의 핵심)
+        if (policyHistory.isNotEmpty)
+          'policyHistory':
+              policyHistory.entries.map((e) => e.toFirestoreEntry()).toList(),
       };
 
   Store copyWith({
@@ -156,6 +166,7 @@ class Store {
     int? payDay,
     String? storeCode,
     Map<String, dynamic>? policy,
+    PolicyHistory? policyHistory,
   }) {
     return Store(
       id: id ?? this.id,
@@ -168,6 +179,7 @@ class Store {
       payDay: payDay ?? this.payDay,
       storeCode: storeCode ?? this.storeCode,
       policy: policy ?? this.policy,
+      policyHistory: policyHistory ?? this.policyHistory,
     );
   }
 }

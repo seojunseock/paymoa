@@ -1,10 +1,12 @@
 // lib/main.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
 import 'firebase_options.dart';
 import 'role/role_gate.dart';
 
@@ -16,6 +18,9 @@ bool _fatalDialogShowing = false; // ✅ 다이얼로그 중복 방지
 Future<void> main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // 카카오 SDK 초기화 (네이티브 앱 키)
+    KakaoSdk.init(nativeAppKey: '0caeaf697a204f827b9d8525bd376311');
 
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -45,19 +50,19 @@ class _SafeBootApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF3B82F6),
+      seedColor: const Color(0xFF7C3AED), // ✅ Paymoa violet-700
       brightness: Brightness.light,
     );
 
-    // ✅ 토스톤(톤다운)
+    // ✅ Paymoa 보라 톤
     final cs = base.copyWith(
-      primary: const Color(0xFF2563EB),
-      primaryContainer: const Color(0xFFEAF2FF),
-      onPrimaryContainer: const Color(0xFF0F172A),
+      primary: const Color(0xFF7C3AED), // violet-700
+      primaryContainer: const Color(0xFFF3EEFF), // 연한 보라
+      onPrimaryContainer: const Color(0xFF3B0764),
       surface: const Color(0xFFFFFFFF),
       surfaceContainerLowest: const Color(0xFFFFFFFF),
-      surfaceContainerLow: const Color(0xFFF7F8FA),
-      surfaceContainer: const Color(0xFFF4F6F8),
+      surfaceContainerLow: const Color(0xFFF8F7FF), // Paymoa background
+      surfaceContainer: const Color(0xFFF4F0FF), // 연보라
       outline: const Color(0x1F0F172A),
     );
 
@@ -67,6 +72,17 @@ class _SafeBootApp extends StatelessWidget {
       navigatorKey: _navKey,
       title: 'Paymoa',
       debugShowCheckedModeBanner: false,
+      // ✅ DatePicker 한국어 및 Material Localization 설정
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('ko', 'KR'),
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: cs,
@@ -173,7 +189,7 @@ class _SafeBootApp extends StatelessWidget {
           contentTextStyle: const TextStyle(fontWeight: FontWeight.w700),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          behavior: SnackBarBehavior.floating,
+          behavior: SnackBarBehavior.fixed,
         ),
         dialogTheme: DialogTheme(
           backgroundColor: cs.surface,
@@ -196,12 +212,44 @@ class _SafeBootApp extends StatelessWidget {
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
+            return const _SplashScreen();
           }
           return const RoleGate();
         },
+      ),
+    );
+  }
+}
+
+/// 앱 시작 시 Firebase 초기화 중 보여주는 스플래시 화면
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image(
+              image: AssetImage('assets/images/splash_logo.png'),
+              width: 160,
+              height: 160,
+            ),
+            SizedBox(height: 24),
+            Text(
+              '페이모아',
+              style: TextStyle(
+                fontSize: 40,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF7C3AED),
+                letterSpacing: -0.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

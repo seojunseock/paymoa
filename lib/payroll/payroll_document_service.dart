@@ -64,6 +64,12 @@ class PayrollDocumentService {
         payDay: effectivePayDay,
       );
 
+      // ✅ 날짜별 시급·가산정책 이력 콜백 (카드 화면과 동일 계산 보장)
+      int wageAtFn(String _, DateTime date) =>
+          w.effectiveHourlyWageAt(store, date);
+      SurchargePolicy surchargeAtFn(DateTime date) =>
+          w.policyHistory.surchargeAt(date) ?? surcharge;
+
       // ✅ 지급분 계산은 엔진을 그대로 사용
       final summary = _engine.summaryForDate(
         policy: policy,
@@ -72,6 +78,8 @@ class PayrollDocumentService {
         tax: tax,
         insurance: insurance,
         surchargePolicy: surcharge,
+        wageAt: wageAtFn,
+        surchargeAt: surchargeAtFn,
         anyDateInPeriod: period.start,
       );
 
@@ -164,6 +172,12 @@ class PayrollDocumentService {
         payDay: effectivePayDay,
       );
 
+      // ✅ 날짜별 시급·가산정책 이력 콜백 (카드 화면과 동일 계산 보장)
+      int wageAtFn(String _, DateTime date) =>
+          w.effectiveHourlyWageAt(store, date);
+      SurchargePolicy surchargeAtFn(DateTime date) =>
+          w.policyHistory.surchargeAt(date) ?? surcharge;
+
       final monthSummary = computeMonthlySummary(
         alba: alba,
         ymYear: year,
@@ -172,6 +186,8 @@ class PayrollDocumentService {
         tax: tax,
         insurance: insurance,
         policy: surcharge,
+        wageAt: wageAtFn,
+        surchargeAt: surchargeAtFn,
       );
 
       final workedMinutes = _sumWorkedMinutesMonthly(ws);
@@ -304,6 +320,7 @@ class PayrollDocumentService {
       endMinute: s.endMinute,
       breakMinutes: s.breakMinutes,
       workType: _mapWorkType(s.workType),
+      overrideHourlyWage: s.overrideHourlyWage, // ✅ 날짜별 시급 반영
     );
   }
 

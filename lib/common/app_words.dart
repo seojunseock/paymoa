@@ -5,7 +5,7 @@ class AppWords {
   AppWords._();
 
   // app
-  static const String appName = 'PayCount';
+  static const String appName = '페이모아';
 
   // common
   static const String ok = '확인';
@@ -93,7 +93,7 @@ class AppWords {
 
   // -------- MyInfoScreen (추가) --------
   static const String logout = '로그아웃';
-  static const String logoutConfirmTitle = '로그아웃 하시겠습니까?';
+  static const String logoutConfirmTitle = '로그아웃 할까요?';
   static const String logoutDone = '로그아웃 완료';
   static const String logoutFailed = '로그아웃에 실패했어요.';
 

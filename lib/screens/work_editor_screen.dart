@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../common/app_words.dart';
+import '../common/paymoa_design.dart';
 import '../common/common_pickers.dart' as cp;
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart' as pol;
@@ -23,6 +24,8 @@ Future<void> showWorkEditorSheet({
   pol.SurchargePolicy? Function(String albaId)? getSurchargePolicy,
   Future<void> Function(String albaId, PolicySheetResult result)?
       onUpdatePolicy,
+  // ✅ 날짜 기반 시급 조회 (policyHistory 기준)
+  int Function(String albaId, DateTime date)? wageAt,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -39,6 +42,7 @@ Future<void> showWorkEditorSheet({
         onDelete: onDelete,
         getSurchargePolicy: getSurchargePolicy,
         onUpdatePolicy: onUpdatePolicy,
+        wageAt: wageAt,
       );
     },
   );
@@ -58,6 +62,7 @@ class _WorkEditorSheet extends StatefulWidget {
     required this.onDelete,
     this.getSurchargePolicy,
     this.onUpdatePolicy,
+    this.wageAt,
   });
 
   final wargs.WorkEditorArgs args;
@@ -71,6 +76,9 @@ class _WorkEditorSheet extends StatefulWidget {
   final pol.SurchargePolicy? Function(String albaId)? getSurchargePolicy;
   final Future<void> Function(String albaId, PolicySheetResult result)?
       onUpdatePolicy;
+
+  // ✅ 날짜 기반 시급 (policyHistory 기준)
+  final int Function(String albaId, DateTime date)? wageAt;
 
   @override
   State<_WorkEditorSheet> createState() => _WorkEditorSheetState();
@@ -88,6 +96,22 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
 
   bool _saving = false;
   _WorkType _workType = _WorkType.basic;
+  int? _overrideWage; // null이면 기본 시급 사용
+
+  // ✅ 매장 알바인지 확인
+  bool get _isStoreAlba {
+    final alba = widget.albas.firstWhere(
+      (a) => a.id == _selectedAlbaId,
+      orElse: () => widget.albas.isNotEmpty
+          ? widget.albas.first
+          : const UICalendarAlba(
+              id: '', name: '', colorHex: '#3B82F6', hourlyWage: 0, payDay: 25),
+    );
+    return alba.storeId.isNotEmpty;
+  }
+
+  String get _selectedAlbaId =>
+      _albaId.isEmpty ? widget.albas.first.id : _albaId;
 
   @override
   void initState() {
@@ -131,7 +155,8 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
         _breakMin = s.breakMinutes;
         _selectedUtcDates = {DateTime.utc(s.year, s.month, s.day)};
         _workType = _mapBackToWorkType(s.workType);
-        // ✅ 시급 override UI 제거: 기존 값이 있어도 편집 화면에서는 다루지 않음
+        // ✅ 기존 overrideHourlyWage 로드 (기준일 전후 시급 표시 정확성)
+        _overrideWage = s.overrideHourlyWage;
       }
     }
   }
@@ -151,8 +176,19 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
 
   String _fmtAm(int h, int m) => cp.fmtAmPm(h, m);
 
+  // MM.DD 형식 (년도 제거)
   String _ymd(DateTime d) =>
-      '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
+      '${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
+
+  String _formatWage(int w) {
+    final s = w.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
 
   pol.SurchargePolicy? _currentSurcharge() =>
       widget.getSurchargePolicy?.call(_albaId);
@@ -187,190 +223,33 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     }
   }
 
+  /// AppBar 타이틀: 날짜 지정 시 "2월 15일 근무 추가", 아니면 기본 타이틀
+  String get _appBarTitle {
+    if (_isEdit) return AppWords.workEditTitle;
+    final preset = widget.args.presetDate;
+    if (preset != null) {
+      return '${preset.month}월 ${preset.day}일 근무 추가';
+    }
+    return AppWords.workAddTitle;
+  }
+
   /* ───────────────── Picker / Sheet ───────────────── */
 
   Future<void> _pickTimeCupertino() async {
-    int sAmpm = _startH < 12 ? 0 : 1;
-    int sHour = (_startH % 12 == 0) ? 12 : _startH % 12;
-    int sMin = _startM;
-
-    int eAmpm = _endH < 12 ? 0 : 1;
-    int eHour = (_endH % 12 == 0) ? 12 : _endH % 12;
-    int eMin = _endM;
-
-    int to24(int ampmIdx, int h12) {
-      if (h12 == 12) h12 = 0;
-      return ampmIdx == 0 ? h12 : h12 + 12;
-    }
-
-    final ampm = const ['오전', '오후'];
-    final hours = List<int>.generate(12, (i) => i + 1);
-    final minutes = List<int>.generate(60, (i) => i);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        return SafeArea(
-          child: SizedBox(
-            height: 360,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                  child: Row(
-                    children: [
-                      TextButton(
-                        onPressed: _saving ? null : () => Navigator.pop(ctx),
-                        child: const Text(AppWords.cancel),
-                      ),
-                      const Spacer(),
-                      Text(
-                        AppWords.workTime,
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () {
-                                setState(() {
-                                  _startH = to24(sAmpm, sHour);
-                                  _startM = sMin;
-                                  _endH = to24(eAmpm, eHour);
-                                  _endM = eMin;
-                                });
-                                Navigator.pop(ctx);
-                              },
-                        child: const Text(AppWords.done),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _PickerBlock(
-                          title: AppWords.workStart,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: sAmpm,
-                                  ),
-                                  onSelectedItemChanged: (i) => sAmpm = i,
-                                  children: ampm
-                                      .map((t) => Center(child: Text(t)))
-                                      .toList(),
-                                ),
-                              ),
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: hours.indexOf(sHour),
-                                  ),
-                                  onSelectedItemChanged: (i) =>
-                                      sHour = hours[i],
-                                  children: hours
-                                      .map((h) => Center(child: Text('$h')))
-                                      .toList(),
-                                ),
-                              ),
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: sMin,
-                                  ),
-                                  onSelectedItemChanged: (i) => sMin = i,
-                                  children: minutes
-                                      .map((m) => Center(
-                                            child: Text(
-                                              m.toString().padLeft(2, '0'),
-                                            ),
-                                          ))
-                                      .toList(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const VerticalDivider(width: 1),
-                      Expanded(
-                        child: _PickerBlock(
-                          title: AppWords.workEnd,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: eAmpm,
-                                  ),
-                                  onSelectedItemChanged: (i) => eAmpm = i,
-                                  children: ampm
-                                      .map((t) => Center(child: Text(t)))
-                                      .toList(),
-                                ),
-                              ),
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: hours.indexOf(eHour),
-                                  ),
-                                  onSelectedItemChanged: (i) =>
-                                      eHour = hours[i],
-                                  children: hours
-                                      .map((h) => Center(child: Text('$h')))
-                                      .toList(),
-                                ),
-                              ),
-                              Expanded(
-                                child: CupertinoPicker(
-                                  itemExtent: 36,
-                                  scrollController: FixedExtentScrollController(
-                                    initialItem: eMin,
-                                  ),
-                                  onSelectedItemChanged: (i) => eMin = i,
-                                  children: minutes
-                                      .map((m) => Center(
-                                            child: Text(
-                                              m.toString().padLeft(2, '0'),
-                                            ),
-                                          ))
-                                      .toList(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${_fmtAm(to24(sAmpm, sHour), sMin)} ~ ${_fmtAm(to24(eAmpm, eHour), eMin)}',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-              ],
-            ),
-          ),
-        );
-      },
+    final result = await cp.showWorkTimePicker(
+      context,
+      startHour24: _startH,
+      startMinute: _startM,
+      endHour24: _endH,
+      endMinute: _endM,
     );
+    if (result == null || !mounted) return;
+    setState(() {
+      _startH = result.startHour24;
+      _startM = result.startMinute;
+      _endH = result.endHour24;
+      _endM = result.endMinute;
+    });
   }
 
   Future<void> _pickBreak() async {
@@ -390,27 +269,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     );
     if (res != null) {
       setState(() => _selectedUtcDates = res.selectedDates.toSet());
-    }
-  }
-
-  Future<void> _openPolicySheet() async {
-    final res = await showPolicySheet(
-      context: context,
-      initialTax: pol.TaxConfig.none,
-      initialIns: const pol.InsuranceNone(),
-      initialSurcharge: _currentSurcharge(),
-    );
-
-    if (res != null) {
-      if (widget.onUpdatePolicy != null) {
-        setState(() => _saving = true);
-        try {
-          await widget.onUpdatePolicy!.call(_albaId, res);
-        } finally {
-          if (mounted) setState(() => _saving = false);
-        }
-      }
-      setState(() {});
     }
   }
 
@@ -460,6 +318,46 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
   }
 
   /* ───────────────── Save / Delete ───────────────── */
+
+  Future<void> _deleteIfEdit() async {
+    if (_saving) return;
+    if (!_isEdit || _editingScheduleId == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppWords.workDeleteConfirmTitle),
+        content: const Text(AppWords.workDeleteConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(AppWords.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(AppWords.delete,
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    setState(() => _saving = true);
+    try {
+      await widget.onDelete(_editingScheduleId!);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${AppWords.deleteFailed}\n$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   Future<void> _save() async {
     if (_saving) return;
@@ -511,11 +409,15 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
             endMinute: _endM,
             breakMinutes: _breakMin,
             workType: _mapWorkType(_workType),
-            overrideHourlyWage: null, // ✅ 시급 설정 UI 제거
+            overrideHourlyWage: _overrideWage,
           ),
         );
       } else {
         for (final d in _selectedUtcDates) {
+          // ✅ 날짜 기반 시급 자동 계산 (policyHistory 기준)
+          // 기준일 이전 근무 → 이전 시급, 기준일 이후 → 새 시급
+          final dateLocal = DateTime(d.year, d.month, d.day);
+          final computedWage = widget.wageAt?.call(_albaId, dateLocal);
           await widget.onAdd(
             UICalendarSchedule(
               id: '',
@@ -529,7 +431,8 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
               endMinute: _endM,
               breakMinutes: _breakMin,
               workType: _mapWorkType(_workType),
-              overrideHourlyWage: null, // ✅ 시급 설정 UI 제거
+              // wageAt이 있으면 날짜 기반 시급, 없으면 null (기본 시급 사용)
+              overrideHourlyWage: computedWage,
             ),
           );
         }
@@ -552,44 +455,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     );
   }
 
-  Future<void> _deleteIfEdit() async {
-    if (_saving) return;
-    if (!_isEdit || _editingScheduleId == null) return;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(AppWords.workDeleteConfirmTitle),
-        content: const Text(AppWords.workDeleteConfirmBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(AppWords.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(AppWords.delete),
-          ),
-        ],
-      ),
-    );
-
-    if (ok != true) return;
-
-    setState(() => _saving = true);
-    try {
-      await widget.onDelete(_editingScheduleId!);
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.deleteFailed}\n$e')),
-      );
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   /* ───────────────── UI ───────────────── */
 
   @override
@@ -599,21 +464,22 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     // 선택 날짜 미리보기 (멀티)
     final sortedDates = _selectedUtcDates.toList()
       ..sort((a, b) => a.compareTo(b));
-    final datePreview = sortedDates.take(3).map(_ymd).toList();
-    final more = sortedDates.length - datePreview.length;
 
     return IgnorePointer(
       ignoring: _saving,
       child: Stack(
         children: [
           Scaffold(
+            backgroundColor: Pm.fieldBg,
             appBar: AppBar(
+              backgroundColor: Pm.fieldBg,
+              elevation: 0,
+              scrolledUnderElevation: 0,
               leading: IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(Icons.arrow_back_ios_new, size: 18),
                 onPressed: () => Navigator.pop(context),
               ),
-              title: Text(
-                  _isEdit ? AppWords.workEditTitle : AppWords.workAddTitle),
+              title: Text(_appBarTitle),
               centerTitle: true,
               actions: [
                 if (_isEdit)
@@ -633,65 +499,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
                       children: [
-                        // ✅ 상단 “요약 카드”
-                        _TossCard(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                children: [
-                                  _ColorDot(color: _albaColor),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _alba.name.isEmpty
-                                          ? AppWords.workPickAlbaTitle
-                                          : _alba.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.titleLarge?.copyWith(
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  _Pill(
-                                    text: _typeLabel,
-                                    bg: _albaColor.withOpacity(0.10),
-                                    fg: theme.colorScheme.onSurface
-                                        .withOpacity(0.75),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              _SummaryRow(
-                                icon: Icons.schedule_rounded,
-                                title: AppWords.workTime,
-                                value: _timeRangeText,
-                              ),
-                              const SizedBox(height: 6),
-                              _SummaryRow(
-                                icon: Icons.event_available_rounded,
-                                title: AppWords.workDate,
-                                value: _datesText,
-                                sub: sortedDates.length <= 1
-                                    ? null
-                                    : '${datePreview.join(' · ')}${more > 0 ? ' · +$more' : ''}',
-                              ),
-                              const SizedBox(height: 6),
-                              _SummaryRow(
-                                icon: Icons.coffee_rounded,
-                                title: AppWords.breakTime,
-                                value: _breakText,
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
                         // ✅ “수정 섹션” (탭 가능한 Row)
                         _TossCard(
                           padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
@@ -726,24 +533,21 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                 title: AppWords.workPickTypeTitle,
                                 value: _typeLabel,
                                 leadingIcon: Icons.category_rounded,
-                                trailing: TextButton(
-                                  onPressed: _openPolicySheet,
-                                  child: const Text(AppWords.workPolicyOpen),
-                                ),
                                 onTap: () async {
                                   final picked =
                                       await showModalBottomSheet<_WorkType>(
                                     context: context,
                                     useSafeArea: true,
                                     showDragHandle: true,
+                                    // ✅ 정책 설정된 타입만 표시
                                     builder: (ctx) => _WorkTypeSheet(
                                       current: _workType,
                                       albaColor: _albaColor,
+                                      surcharge: _currentSurcharge(),
                                     ),
                                   );
-                                  if (picked != null) {
-                                    setState(() => _workType = picked);
-                                  }
+                                  if (picked == null) return;
+                                  setState(() => _workType = picked);
                                 },
                               ),
                               const Divider(height: 1),
@@ -756,18 +560,16 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                               const Divider(height: 1),
                               _TapRow(
                                 title: AppWords.workDate,
-                                value: _datesText,
+                                value: '총 ${_selectedUtcDates.length}일',
                                 leadingIcon: Icons.event_rounded,
-                                sub: sortedDates.length <= 1
+                                sub: _selectedUtcDates.isEmpty
                                     ? null
                                     : Wrap(
                                         spacing: 6,
                                         runSpacing: 6,
                                         children: [
-                                          for (final t in datePreview)
-                                            _MiniChip(text: t),
-                                          if (more > 0)
-                                            _MiniChip(text: '+$more'),
+                                          for (final t in sortedDates)
+                                            _MiniChip(text: _ymd(t)),
                                         ],
                                       ),
                                 onTap: _pickDates,
@@ -779,9 +581,9 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                 leadingIcon: Icons.coffee_rounded,
                                 onTap: _pickBreak,
                               ),
-                            ],
-                          ),
-                        ),
+                            ], // Column children
+                          ), // Column
+                        ), // _TossCard
                       ],
                     ),
                   ),
@@ -797,8 +599,9 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                         child: FilledButton(
                           onPressed: _save,
                           style: FilledButton.styleFrom(
+                            backgroundColor: Pm.primary,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(Pm.radiusBtn),
                             ),
                           ),
                           child: Text(
@@ -839,7 +642,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       case _WorkType.holiday:
         return WorkType.holiday;
       case _WorkType.basic:
-      default:
         return WorkType.basic;
     }
   }
@@ -855,7 +657,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       case WorkType.holiday:
         return _WorkType.holiday;
       case WorkType.basic:
-      default:
         return _WorkType.basic;
     }
   }
@@ -1200,14 +1001,18 @@ class _WorkTypeSheet extends StatelessWidget {
   const _WorkTypeSheet({
     required this.current,
     required this.albaColor,
+    this.surcharge,
   });
 
   final _WorkType current;
   final Color albaColor;
+  // ✅ 정책 기반 필터링: null이면 기본+대타만 표시
+  final pol.SurchargePolicy? surcharge;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final sur = surcharge;
 
     Widget tile(_WorkType t, String label, IconData icon) {
       final on = t == current;
@@ -1244,15 +1049,101 @@ class _WorkTypeSheet extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
+          // ✅ 기본 + 대타는 항상 표시
           tile(_WorkType.basic, AppWords.workTypeBasic, Icons.work_rounded),
           tile(_WorkType.substitute, AppWords.workTypeSubstitute,
               Icons.swap_horiz_rounded),
-          tile(_WorkType.night, AppWords.workTypeNight, Icons.nightlight_round),
-          tile(_WorkType.overtime, AppWords.workTypeOvertime,
-              Icons.timer_rounded),
-          tile(_WorkType.holiday, AppWords.workTypeHoliday, Icons.beach_access),
+          // ✅ 야간/연장/휴일: 해당 정책이 활성화된 경우만 표시
+          if (sur != null && sur.nightEnabled)
+            tile(_WorkType.night, AppWords.workTypeNight,
+                Icons.nightlight_round),
+          if (sur != null && sur.overtimeEnabled)
+            tile(_WorkType.overtime, AppWords.workTypeOvertime,
+                Icons.timer_rounded),
+          if (sur != null && sur.holidayEnabled)
+            tile(_WorkType.holiday, AppWords.workTypeHoliday,
+                Icons.beach_access),
           const SizedBox(height: 10),
         ],
+      ),
+    );
+  }
+}
+
+/* ───────────────────────── 시급 옵션 타일 (공용) ───────────────────────── */
+
+class _WageOptionTile extends StatelessWidget {
+  const _WageOptionTile({
+    required this.label,
+    required this.sublabel,
+    required this.selected,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final String label;
+  final String sublabel;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFF7C3AED);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: selected ? primary.withOpacity(0.07) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color:
+                selected ? primary.withOpacity(0.4) : const Color(0xFFE5E7EB),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked,
+              color: selected ? primary : const Color(0xFFD1D5DB),
+              size: 22,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? primary : const Color(0xFF111827),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    sublabel,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: selected
+                          ? primary.withOpacity(0.7)
+                          : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
+        ),
       ),
     );
   }

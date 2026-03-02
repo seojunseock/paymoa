@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../common/app_words.dart';
+import '../common/paymoa_design.dart';
 import '../models/ui_calendar_models.dart';
 import '../common/common_pickers.dart' as cp;
 import '../policies/policies.dart' as pol;
@@ -25,6 +26,17 @@ class _DotEvent {
   final Color color;
   final String albaName;
   const _DotEvent(this.color, this.albaName);
+}
+
+String _wonNum(int v) {
+  final s = v.toString();
+  final b = StringBuffer();
+  for (int i = 0; i < s.length; i++) {
+    b.write(s[i]);
+    final left = s.length - i - 1;
+    if (left > 0 && left % 3 == 0) b.write(',');
+  }
+  return b.toString();
 }
 
 String _fmtHm(int h, int m) =>
@@ -92,7 +104,7 @@ String _typeLabelByTime(List<UICalendarSchedule> children) {
   return labels.join('+');
 }
 
-/* ───────────────────────── Toss Tone UI ───────────────────────── */
+/* ───────────────────────── Paymoa UI 컴포넌트 ───────────────────────── */
 
 class _TossCard extends StatelessWidget {
   const _TossCard({
@@ -107,44 +119,10 @@ class _TossCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.12)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            child: Container(
-              width: 6,
-              decoration: BoxDecoration(
-                color: accent.withOpacity(0.95),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(18),
-                  bottomLeft: Radius.circular(18),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.only(left: 6).add(padding),
-            child: child,
-          ),
-        ],
-      ),
+    return PmCard(
+      accent: accent,
+      padding: padding,
+      child: child,
     );
   }
 }
@@ -154,40 +132,43 @@ class _DayCell extends StatelessWidget {
     required this.text,
     required this.selected,
     required this.isToday,
+    this.weekday,
   });
 
   final String text;
   final bool selected;
   final bool isToday;
+  final int? weekday; // DateTime.monday(1) ~ DateTime.sunday(7)
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final isSun = weekday == DateTime.sunday;
+    final isSat = weekday == DateTime.saturday;
 
-    // ✅ 톤다운 포인트:
-    // - 선택: primary(쨍한 파랑) 대신 primaryContainer(부드러운 파랑/회색) 사용
-    // - 오늘: 아주 옅은 틴트 + 얇은 테두리
     final bg = selected
-        ? theme.colorScheme.primaryContainer
+        ? PaymoaColors.primary
         : isToday
-            ? theme.colorScheme.primary.withOpacity(0.06)
+            ? PaymoaColors.primary.withOpacity(0.08)
             : Colors.transparent;
 
     final fg = selected
-        ? theme.colorScheme.onPrimaryContainer
-        : theme.colorScheme.onSurface.withOpacity(0.88);
+        ? Colors.white
+        : isToday
+            ? PaymoaColors.primary
+            : isSun
+                ? const Color(0xFFE53935)
+                : isSat
+                    ? const Color(0xFF1E88E5)
+                    : PaymoaColors.textPrimary;
 
     final border = (!selected && isToday)
-        ? Border.all(
-            color: theme.colorScheme.primary.withOpacity(0.22),
-            width: 1.1,
-          )
+        ? Border.all(color: PaymoaColors.primary.withOpacity(0.3), width: 1.5)
         : null;
 
     return Center(
       child: Container(
-        width: 36,
-        height: 36,
+        width: 40,
+        height: 40,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: bg,
@@ -196,8 +177,9 @@ class _DayCell extends StatelessWidget {
         ),
         child: Text(
           text,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w900,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
             color: fg,
           ),
         ),
@@ -288,6 +270,7 @@ class _ExpandableMergedCard extends StatefulWidget {
     required this.localDate,
     required this.onEdit,
     required this.onDelete,
+    this.wageAt,
   });
 
   final UICalendarAlba alba;
@@ -297,6 +280,7 @@ class _ExpandableMergedCard extends StatefulWidget {
 
   final void Function(String scheduleId) onEdit;
   final void Function(String scheduleId) onDelete;
+  final int Function(String albaId, DateTime dateLocal)? wageAt;
 
   @override
   State<_ExpandableMergedCard> createState() => _ExpandableMergedCardState();
@@ -312,6 +296,10 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
 
     final totalHoursText = _hoursText(b.totalWorkedMinutes);
     final typeLabel = _typeLabelByTime(b.children);
+    final firstSchedule = b.children.isNotEmpty ? b.children.first : null;
+    final effectiveWage = firstSchedule?.overrideHourlyWage ??
+        widget.wageAt?.call(widget.alba.id, widget.localDate) ??
+        widget.alba.hourlyWage;
 
     final lines = [...b.children]..sort((a, b) {
         final amn = a.startHour * 60 + a.startMinute;
@@ -334,24 +322,49 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                     widget.alba.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: PaymoaColors.textPrimary,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: widget.color.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(999),
+                    color: widget.color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     typeLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: widget.color,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                // ── 시급 배지
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: widget.color.withOpacity(0.13),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: widget.color.withOpacity(0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    '${_wonNum(effectiveWage)}원/시',
+                    style: TextStyle(
+                      fontSize: 11,
                       fontWeight: FontWeight.w800,
-                      color: theme.colorScheme.onSurface.withOpacity(0.75),
+                      color: widget.color,
                     ),
                   ),
                 ),
@@ -417,7 +430,8 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                         children: [
                           IconButton(
                             tooltip: AppWords.delete,
-                            icon: const Icon(Icons.delete_outline),
+                            icon: const Icon(Icons.delete_outline,
+                                color: PaymoaColors.error),
                             onPressed: () => widget.onDelete(s.id),
                           ),
                           TextButton(
@@ -454,7 +468,9 @@ class AlbaStartScreen extends StatefulWidget {
     this.getTaxPolicy,
     this.getInsurancePolicy,
     this.getSurchargePolicy,
+    this.getSurchargeAt,
     this.getPayrollPolicy,
+    this.getWageAt,
   });
 
   final List<UICalendarAlba> albas;
@@ -479,7 +495,13 @@ class AlbaStartScreen extends StatefulWidget {
   final Object? Function(String albaId)? getTaxPolicy;
   final Object? Function(String albaId)? getInsurancePolicy;
   final Object? Function(String albaId)? getSurchargePolicy;
+
+  /// ✅ 날짜별 가산정책 콜백 (정책 이력 반영)
+  final pol.SurchargePolicy Function(DateTime)? Function(String albaId)?
+      getSurchargeAt;
   final PayrollPolicy? Function(String albaId)? getPayrollPolicy;
+  // ✅ 날짜별 시급 조회 (policyHistory 기반)
+  final int Function(String albaId, DateTime dateLocal)? getWageAt;
 
   @override
   State<AlbaStartScreen> createState() => _AlbaStartScreenState();
@@ -586,9 +608,11 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
               onPressed: () => Navigator.pop(dctx, false),
               child: const Text(AppWords.cancel),
             ),
-            FilledButton(
+            TextButton(
               onPressed: () => Navigator.pop(dctx, true),
-              child: const Text(AppWords.delete),
+              child: const Text(AppWords.delete,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
             ),
           ],
         );
@@ -624,9 +648,11 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
             TextButton(
                 onPressed: () => Navigator.pop(dctx, false),
                 child: const Text(AppWords.cancel)),
-            FilledButton(
+            TextButton(
               onPressed: () => Navigator.pop(dctx, true),
-              child: const Text(AppWords.delete),
+              child: const Text(AppWords.delete,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
             ),
           ],
         );
@@ -634,6 +660,36 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     );
 
     if (ok == true) widget.onDeleteAlba(albaId);
+  }
+
+  /// ✅ 매장 탈퇴 확인 다이얼로그 (조인 알바 전용)
+  Future<void> _confirmLeaveStore(String storeId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) {
+        return AlertDialog(
+          title: const Text('매장 탈퇴'),
+          content: const Text(
+            '이 매장에서 탈퇴하면 매장 근무 기록이 더 이상 표시되지 않아요.\n계속할까요?',
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dctx, false),
+                child: const Text(AppWords.cancel)),
+            TextButton(
+              onPressed: () => Navigator.pop(dctx, true),
+              child: const Text(
+                '탈퇴',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: Color(0xFFF43F5E)),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok == true) widget.onDeleteAlba(storeId);
   }
 
   /// ✅ 핵심 수정: 바텀시트 닫힘(Barrier 제거) 이후 프레임에 이동
@@ -783,6 +839,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
   Future<void> _openJoinStoreFlow() async {
     if (_joinSaving) return;
 
+    // ① 코드 입력 시트 (bottom sheet)
     final sheet = await showModalBottomSheet<JoinStoreSheetResult>(
       context: context,
       useSafeArea: true,
@@ -790,19 +847,15 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
       showDragHandle: true,
       builder: (_) => const JoinStoreSheet(),
     );
-
     if (!mounted || sheet == null) return;
 
-    final joinInfo = await _askJoinInfo(context, sheet.initial.storeName);
-    if (!mounted || joinInfo == null) return;
-
-    final aliasName = joinInfo.aliasName ?? sheet.initial.storeName;
+    // ② 중간 시트 없이 바로 AlbaFormScreen으로
+    //    - 이름 입력, 매장 별칭, 근무설정 모두 한 화면에서
     final i0 = sheet.initial;
-    final defaults = i0.storeDefaults;
-
     final initial = AlbaFormInitial(
       storeId: i0.storeId,
-      storeName: aliasName,
+      workerName: '', // AlbaFormScreen에서 직접 입력
+      storeName: i0.storeName, // 매장 기본명 (별칭으로 변경 가능)
       hourlyWage: i0.hourlyWage,
       tax: i0.tax,
       insurance: i0.insurance,
@@ -816,8 +869,8 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
       selectedDates: i0.selectedDates,
       colorHex: i0.colorHex,
       payDay: i0.payDay,
-      inheritFromStore: joinInfo.inherit,
-      storeDefaults: defaults,
+      inheritFromStore: true, // 신규 조인: 항상 매장 설정 따름
+      storeDefaults: i0.storeDefaults,
     );
 
     final form = await Navigator.push<AlbaFormResult>(
@@ -832,7 +885,6 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
         ),
       ),
     );
-
     if (!mounted || form == null) return;
 
     final user = FirebaseAuth.instance.currentUser;
@@ -854,8 +906,8 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     try {
       await widget.onJoinSubmit!(
         sheet,
-        joinInfo.workerName,
-        joinInfo.aliasName,
+        form.workerName ?? '', // AlbaFormScreen에서 입력한 이름
+        form.storeName, // 별칭
         form,
       );
       if (!mounted) return;
@@ -935,6 +987,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                   color: color,
                   block: block,
                   localDate: localDate,
+                  wageAt: _wageAtFn,
                   onEdit: (scheduleId) {
                     Navigator.pop(ctx);
                     widget.onOpenWorkEditor(
@@ -989,24 +1042,40 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                         ),
                       ),
                       const Spacer(),
-                      IconButton(
-                        tooltip: AppWords.addWork,
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          widget.onOpenWorkEditor(
-                            wargs.WorkEditorArgs(
-                              mode: wargs.WorkEditorArgsMode.add,
-                              presetDate: localDate,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.add_circle_outline),
-                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 6),
                 ...cards,
+                // ✅ 하단 근무 추가 버튼 (캘린더 화면과 동일)
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        widget.onOpenWorkEditor(
+                          wargs.WorkEditorArgs(
+                            mode: wargs.WorkEditorArgsMode.add,
+                            presetDate: localDate,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      label: const Text('근무 추가',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C3AED),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1029,7 +1098,14 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
   pol.SurchargePolicy? _surOf(String id) =>
       (widget.getSurchargePolicy?.call(id) as pol.SurchargePolicy?);
 
+  pol.SurchargePolicy Function(DateTime)? _surchargeAtOf(String id) =>
+      widget.getSurchargeAt?.call(id);
+
   PayrollPolicy? _payrollOf(String id) => widget.getPayrollPolicy?.call(id);
+
+  /// ✅ 날짜별 시급 조회 (policyHistory 기반)
+  int Function(String albaId, DateTime dateLocal)? get _wageAtFn =>
+      widget.getWageAt;
 
   bool _anySurchargeEnabled(pol.SurchargePolicy? s) {
     if (s == null) return false;
@@ -1099,31 +1175,98 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     return '${cycleLabel()} · ${payRuleLabel()}';
   }
 
-  double _calcGrossUntilToday(
-      UICalendarAlba alba, List<UICalendarSchedule> all) {
-    final now = DateTime.now();
-    final targets = all.where((s) {
-      if (s.albaId != alba.id) return false;
-      final d = DateTime(s.year, s.month, s.day);
-      return !d.isAfter(DateTime(now.year, now.month, now.day));
-    });
+  // ────────────────────────────────────────────────
+  // 급여 계산: 급여 정책 기반 현재 기간 전체 예상 급여
+  // ────────────────────────────────────────────────
 
-    double gross = 0;
-    for (final s in targets) {
-      final minutes = _workedMinutes(s);
-      final wage = (s.overrideHourlyWage ?? alba.hourlyWage).toDouble();
-      gross += (minutes / 60.0) * wage;
+  /// 급여 라벨 반환 ("2월 급여" 또는 "2/15~3/14 급여")
+  String _payLabel(String albaId) {
+    final payroll = _payrollOf(albaId);
+    if (payroll == null || payroll.cycle == PayCycleType.monthly) {
+      return '${_focusedDay.month}월 급여';
     }
-    return gross;
+    if (payroll.cycle == PayCycleType.daily) {
+      return '오늘 급여';
+    }
+    final preview = computePreviewForDate(
+      policy: payroll,
+      anyDateInPeriod: _focusedDay,
+    );
+    final s = preview.period.start;
+    final e = preview.period.end;
+    return '${s.month}/${s.day}~${e.month}/${e.day} 급여';
   }
 
-  int _workedMinutes(UICalendarSchedule s) {
-    final start = Duration(hours: s.startHour, minutes: s.startMinute);
-    var end = Duration(hours: s.endHour, minutes: s.endMinute);
-    var diff = end - start;
-    if (diff.isNegative) diff += const Duration(days: 1);
-    final worked = diff.inMinutes - (s.breakMinutes).clamp(0, diff.inMinutes);
-    return worked.clamp(0, 24 * 60);
+  /// 특정 월(ymDate)의 세후 예상 수령액 계산
+  int _calcPeriodNetForMonth(UICalendarAlba alba, DateTime ymDate) {
+    final payroll = _payrollOf(alba.id);
+    final sur = _surOf(alba.id) ?? const pol.SurchargePolicy();
+
+    // ── ① 월 기준 ──────────────────────────────────
+    if (payroll == null || payroll.cycle == PayCycleType.monthly) {
+      final monthSchedules = widget.schedules
+          .where((s) =>
+              s.albaId == alba.id &&
+              s.year == ymDate.year &&
+              s.month == ymDate.month)
+          .toList();
+      if (monthSchedules.isEmpty) return 0;
+      final surchargeAt = _surchargeAtOf(alba.id);
+      final result = computeMonthlySummary(
+        alba: alba,
+        ymDate: ymDate,
+        schedules: monthSchedules,
+        tax: _taxOf(alba.id),
+        insurance: _insOf(alba.id),
+        policy: sur,
+        surchargeAt: surchargeAt,
+        wageAt: _wageAtFn,
+      );
+      return result.net;
+    }
+
+    // ── ② 급여 기간 기준 (주·2주·커스텀) ────────────
+    final surchargeAt2 = _surchargeAtOf(alba.id);
+    final summary = const PayrollEngine().summaryForDate(
+      policy: payroll,
+      alba: alba,
+      schedules:
+          widget.schedules.where((s) => s.albaId == alba.id).toList(),
+      tax: _taxOf(alba.id),
+      insurance: _insOf(alba.id),
+      surchargePolicy: sur,
+      wageAt: _wageAtFn,
+      surchargeAt: surchargeAt2,
+      anyDateInPeriod: ymDate,
+    );
+    return summary.net;
+  }
+
+  /// 현재 포커스 월의 세후 예상 수령액 계산
+  int _calcPeriodNet(UICalendarAlba alba) =>
+      _calcPeriodNetForMonth(alba, _focusedDay);
+
+  /// 다음 급여일 계산
+  DateTime? _nextPayDate(UICalendarAlba alba) {
+    final payroll = _payrollOf(alba.id);
+    if (payroll == null) return null;
+    final preview = computePreviewForDate(
+      policy: payroll,
+      anyDateInPeriod: DateTime.now(),
+    );
+    return preview.payDate;
+  }
+
+  /// D-day 텍스트 (D-7, D-Day, D+1 …)
+  String _dDayText(DateTime payDate) {
+    final today = DateTime(
+        DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final target =
+        DateTime(payDate.year, payDate.month, payDate.day);
+    final diff = target.difference(today).inDays;
+    if (diff == 0) return 'D-Day';
+    if (diff > 0) return 'D-$diff';
+    return 'D+${-diff}';
   }
 
   int _totalWorkDaysOfMonth(String albaId) {
@@ -1132,6 +1275,35 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     return widget.schedules
         .where((s) => s.albaId == albaId && s.year == y && s.month == m)
         .length;
+  }
+
+  // ─── 오늘 근무 목록 (시작 시간 순) ────────────────────────────
+  List<({UICalendarSchedule s, UICalendarAlba alba})> _todaySchedules() {
+    final now = DateTime.now();
+    final todayItems = <({UICalendarSchedule s, UICalendarAlba alba})>[];
+
+    for (final s in widget.schedules) {
+      if (s.year != now.year || s.month != now.month || s.day != now.day)
+        continue;
+      final alba = widget.albas.firstWhere(
+        (a) => a.id == s.albaId,
+        orElse: () => UICalendarAlba(
+          id: s.albaId,
+          name: '?',
+          colorHex: '#9CA3AF',
+          hourlyWage: 0,
+          payDay: 25,
+        ),
+      );
+      todayItems.add((s: s, alba: alba));
+    }
+
+    todayItems.sort((a, b) {
+      final am = a.s.startHour * 60 + a.s.startMinute;
+      final bm = b.s.startHour * 60 + b.s.startMinute;
+      return am.compareTo(bm);
+    });
+    return todayItems;
   }
 
   String _won(num v) {
@@ -1150,50 +1322,71 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: PaymoaColors.background,
       appBar: AppBar(
         centerTitle: true,
+        backgroundColor: PaymoaColors.background,
+        elevation: 0,
+        automaticallyImplyLeading: false, // ✅ 바텀탭 있으므로 뒤로가기 불필요
         title: const Text(
-          'PayMoa',
-          style: TextStyle(fontWeight: FontWeight.w900),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new),
-          onPressed: widget.onBack,
+          '페이모아',
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            fontSize: 20,
+            color: PaymoaColors.textPrimary,
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _joinSaving ? null : _showFabMenu,
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: theme.colorScheme.onPrimary,
-        elevation: 3,
+        backgroundColor: PaymoaColors.primary,
+        foregroundColor: Colors.white,
+        elevation: 4,
         icon: _joinSaving
             ? const SizedBox(
                 height: 18,
                 width: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : const Icon(Icons.add),
         label: Text(
-          _joinSaving ? '처리 중…' : '추가',
-          style: const TextStyle(fontWeight: FontWeight.w900),
+          _joinSaving ? '잠깐만요...' : '추가',
+          style: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-            child: _WeeklyCalendarBox(
-              focusedDay: _focusedDay,
-              selectedDay: _selectedDay,
-              onDaySelected: _onTapDay,
-              onPageChanged: (fd) => setState(() => _focusedDay = fd),
-              eventLoader: (day) {
-                final k = DateTime(day.year, day.month, day.day);
-                return _dotsByDay[k] ?? const <_DotEvent>[];
-              },
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _WeeklyCalendarBox(
+                  focusedDay: _focusedDay,
+                  selectedDay: _selectedDay,
+                  onDaySelected: _onTapDay,
+                  onPageChanged: (fd) => setState(() => _focusedDay = fd),
+                  eventLoader: (day) {
+                    final k = DateTime(day.year, day.month, day.day);
+                    return _dotsByDay[k] ?? const <_DotEvent>[];
+                  },
+                  albas: widget.albas,
+                ),
+              ],
             ),
           ),
+          // ─── 오늘 근무 한줄 요약 ────────────────────────────────
+          Builder(builder: (ctx) {
+            final todayItems = _todaySchedules();
+            if (todayItems.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: _TodayWorkBanner(items: todayItems),
+            );
+          }),
           Expanded(
             child: widget.albas.isEmpty
                 ? const _EmptyView()
@@ -1203,39 +1396,12 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                     itemBuilder: (context, index) {
                       final alba = widget.albas[index];
                       final color = cp.parseColor(alba.colorHex);
-                      final todayGross =
-                          _calcGrossUntilToday(alba, widget.schedules);
 
-                      final tax = _taxOf(alba.id);
-                      final ins = _insOf(alba.id);
-                      final sur = _surOf(alba.id);
-                      final payroll = _payrollOf(alba.id);
-
-                      final rows = <Widget>[];
-                      if (tax != pol.TaxConfig.none) {
-                        rows.add(_kv(AppWords.tax, _labelTax(tax)));
-                      }
-                      if (ins is! pol.InsuranceNone) {
-                        rows.add(_kv(AppWords.insurance, _labelIns(ins)));
-                      }
-                      if (_anySurchargeEnabled(sur)) {
-                        rows.add(_kv(AppWords.surcharge, _labelSurcharge(sur)));
-                      }
-                      if (payroll != null) {
-                        rows.add(_kv(
-                            AppWords.payroll, _payrollSummaryLine(payroll)));
-                      }
-
-                      rows.add(
-                        _kv(
-                          '${_focusedDay.month}${AppWords.monthUnit} ${AppWords.workCount}',
-                          '${_totalWorkDaysOfMonth(alba.id)}${AppWords.timesUnit}',
-                        ),
-                      );
+                      final workCount = _totalWorkDaysOfMonth(alba.id);
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                            horizontal: 12, vertical: 6),
                         child: _TossCard(
                           accent: color,
                           child: Theme(
@@ -1244,68 +1410,341 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                             child: ExpansionTile(
                               key: PageStorageKey(alba.id),
                               tilePadding:
-                                  const EdgeInsets.fromLTRB(0, 2, 0, 2),
+                                  const EdgeInsets.fromLTRB(0, 4, 4, 4),
                               childrenPadding:
-                                  const EdgeInsets.fromLTRB(0, 10, 0, 12),
+                                  const EdgeInsets.fromLTRB(0, 8, 0, 12),
+                              // 펼치기 아이콘 Paymoa 보라
+                              iconColor: PaymoaColors.primary,
+                              collapsedIconColor: PaymoaColors.textTertiary,
                               title: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // 알바 이름
                                   Text(
-                                    '${alba.name}  ·  ${alba.payDay}${AppWords.dayUnit}',
-                                    style:
-                                        theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w900,
+                                    alba.name,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                      color: PaymoaColors.textPrimary,
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 4),
+                                  // 시급
                                   Text(
-                                    '${AppWords.hourlyWage}  ${_won(alba.hourlyWage)}',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: theme.colorScheme.onSurface
-                                          .withOpacity(0.68),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '예상 급여  ${_won(todayGross)}',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: theme.colorScheme.onSurface
-                                          .withOpacity(0.68),
-                                      fontWeight: FontWeight.w700,
+                                    '시급 ${_won(alba.hourlyWage)}',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: PaymoaColors.textSecondary,
                                     ),
                                   ),
                                 ],
                               ),
                               children: [
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      tooltip: AppWords.delete,
-                                      onPressed: () =>
-                                          _confirmDeleteAlba(alba.id),
-                                      icon: const Icon(Icons.delete_outline),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    TextButton(
-                                      onPressed: () =>
-                                          widget.onEditAlba(alba.id),
-                                      child: const Text(AppWords.edit),
-                                    ),
-                                    const Spacer(),
-                                    FilledButton.tonal(
-                                      onPressed: () => widget.onOpenWorkEditor(
-                                        wargs.WorkEditorArgs(
-                                          mode: wargs.WorkEditorArgsMode.add,
-                                          preselectedAlbaId: alba.id,
-                                        ),
-                                      ),
-                                      child: const Text(AppWords.addWork),
-                                    ),
-                                  ],
+                                // 구분선
+                                Divider(
+                                  height: 1,
+                                  color: color.withOpacity(0.2),
                                 ),
                                 const SizedBox(height: 10),
-                                ...rows,
+                                _kv(
+                                  '${_focusedDay.month}${AppWords.monthUnit} ${AppWords.workCount}',
+                                  '$workCount${AppWords.timesUnit}',
+                                ),
+                                // ── 다음 급여일 D-day
+                                () {
+                                  final payDate = _nextPayDate(alba);
+                                  if (payDate == null) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  final dday = _dDayText(payDate);
+                                  final ddayColor = dday == 'D-Day'
+                                      ? const Color(0xFF7C3AED)
+                                      : dday.startsWith('D-')
+                                          ? const Color(0xFF059669)
+                                          : PaymoaColors.textSecondary;
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            '다음 급여일',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              color: PaymoaColors.textSecondary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          '${payDate.month}/${payDate.day}',
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: PaymoaColors.textPrimary,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: ddayColor.withOpacity(0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            dday,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              color: ddayColor,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }(),
+                                // ── 지난달 / 이번달 예상 급여
+                                () {
+                                  final prevDate = DateTime(
+                                      _focusedDay.year,
+                                      _focusedDay.month - 1,
+                                      1);
+                                  final prevNet = _calcPeriodNetForMonth(
+                                      alba, prevDate);
+                                  final curNet = _calcPeriodNet(alba);
+                                  return Column(
+                                    children: [
+                                      _kv(
+                                        '지난 ${prevDate.month}월 예상 수령',
+                                        _won(prevNet),
+                                      ),
+                                      _kv(
+                                        '이번 ${_focusedDay.month}월 예상 수령',
+                                        _won(curNet),
+                                      ),
+                                    ],
+                                  );
+                                }(),
+                                const SizedBox(height: 12),
+                                // ✅ 매장 조인 알바 vs 개인 알바 버튼 분기
+                                if (alba.storeId.isNotEmpty) ...[
+                                  // ─────────────────────────────────────
+                                  // 📦 매장 조인 알바: 시급/정책은 사장님 관리
+                                  // 버튼: 탈퇴 | 근무 추가
+                                  // ─────────────────────────────────────
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 7),
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF3F0FF),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.storefront_outlined,
+                                            size: 13,
+                                            color: PaymoaColors.primary
+                                                .withOpacity(0.7)),
+                                        const SizedBox(width: 5),
+                                        const Text(
+                                          '시급·정책은 사장님이 설정해요',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                            color: Color(0xFF6D28D9),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 40,
+                                    child: Row(
+                                      children: [
+                                        // ① 탈퇴: 빨강
+                                        Expanded(
+                                          child: TextButton.icon(
+                                            onPressed: () =>
+                                                _confirmLeaveStore(alba.id),
+                                            icon: const Icon(
+                                              Icons.logout_rounded,
+                                              size: 16,
+                                              color: PaymoaColors.error,
+                                            ),
+                                            label: const Text(
+                                              '탈퇴',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: PaymoaColors.error,
+                                              ),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: 1,
+                                            height: 24,
+                                            child: ColoredBox(
+                                                color: Color(0xFFD1D5DB))),
+                                        // ② 근무 추가: 보라
+                                        Expanded(
+                                          child: TextButton.icon(
+                                            onPressed: () =>
+                                                widget.onOpenWorkEditor(
+                                              wargs.WorkEditorArgs(
+                                                mode: wargs
+                                                    .WorkEditorArgsMode.add,
+                                                preselectedAlbaId: alba.id,
+                                              ),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.add,
+                                              size: 16,
+                                              color: PaymoaColors.primary,
+                                            ),
+                                            label: const Text(
+                                              '근무 추가',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: PaymoaColors.primary,
+                                              ),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor:
+                                                  PaymoaColors.primary,
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ] else ...[
+                                  // ─────────────────────────────────────
+                                  // 👤 개인 알바: 삭제 / 수정 / 근무 추가
+                                  // ─────────────────────────────────────
+                                  SizedBox(
+                                    height: 40,
+                                    child: Row(
+                                      children: [
+                                        // ① 삭제: 빨강
+                                        Expanded(
+                                          child: TextButton.icon(
+                                            onPressed: () =>
+                                                _confirmDeleteAlba(alba.id),
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                              size: 16,
+                                              color: PaymoaColors.error,
+                                            ),
+                                            label: const Text(
+                                              '삭제',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: PaymoaColors.error,
+                                              ),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: 1,
+                                            height: 24,
+                                            child: ColoredBox(
+                                                color: Color(0xFFD1D5DB))),
+                                        // ② 수정: 회색
+                                        Expanded(
+                                          child: TextButton.icon(
+                                            onPressed: () =>
+                                                widget.onEditAlba(alba.id),
+                                            icon: const Icon(
+                                              Icons.edit_outlined,
+                                              size: 16,
+                                              color: PaymoaColors.primary,
+                                            ),
+                                            label: const Text(
+                                              '수정',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: PaymoaColors.primary,
+                                              ),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor:
+                                                  PaymoaColors.primary,
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: 1,
+                                            height: 24,
+                                            child: ColoredBox(
+                                                color: Color(0xFFD1D5DB))),
+                                        // ③ 근무 추가: 보라
+                                        Expanded(
+                                          child: TextButton.icon(
+                                            onPressed: () =>
+                                                widget.onOpenWorkEditor(
+                                              wargs.WorkEditorArgs(
+                                                mode: wargs
+                                                    .WorkEditorArgsMode.add,
+                                                preselectedAlbaId: alba.id,
+                                              ),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.add,
+                                              size: 16,
+                                              color: PaymoaColors.primary,
+                                            ),
+                                            label: const Text(
+                                              '근무 추가',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: PaymoaColors.primary,
+                                              ),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor:
+                                                  PaymoaColors.primary,
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -1331,6 +1770,7 @@ class _WeeklyCalendarBox extends StatelessWidget {
     required this.onDaySelected,
     required this.onPageChanged,
     required this.eventLoader,
+    required this.albas,
   });
 
   final DateTime focusedDay;
@@ -1338,6 +1778,7 @@ class _WeeklyCalendarBox extends StatelessWidget {
   final void Function(DateTime selectedDay, DateTime focusedDay) onDaySelected;
   final void Function(DateTime focusedDay) onPageChanged;
   final List<dynamic> Function(DateTime day) eventLoader;
+  final List<UICalendarAlba> albas;
 
   String _dowLabel(DateTime day) {
     switch (day.weekday) {
@@ -1367,14 +1808,19 @@ class _WeeklyCalendarBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.12)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF3F4F6), width: 1),
         boxShadow: [
           BoxShadow(
+            color: const Color(0xFF7C3AED).withOpacity(0.05),
+            blurRadius: 0,
+            spreadRadius: 1,
+          ),
+          BoxShadow(
             color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -1420,24 +1866,27 @@ class _WeeklyCalendarBox extends StatelessWidget {
             text: '${day.day}',
             selected: false,
             isToday: false,
+            weekday: day.weekday,
           ),
           todayBuilder: (ctx, day, _) => _DayCell(
             text: '${day.day}',
             selected: false,
             isToday: true,
+            weekday: day.weekday,
           ),
           selectedBuilder: (ctx, day, _) => _DayCell(
             text: '${day.day}',
             selected: true,
             isToday: false,
+            weekday: day.weekday,
           ),
           markerBuilder: (context, day, events) {
-            if (events.isEmpty) return const SizedBox.shrink();
             final dots = events.whereType<_DotEvent>().toList();
+
             if (dots.isEmpty) return const SizedBox.shrink();
 
-            const double size = 6;
-            const double gap = 4;
+            const double dotSize = 6;
+            const double dotGap = 4;
 
             return Padding(
               padding: const EdgeInsets.only(top: 28),
@@ -1445,10 +1894,10 @@ class _WeeklyCalendarBox extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(dots.length.clamp(0, 4), (i) {
                   return Container(
-                    width: size,
-                    height: size,
+                    width: dotSize,
+                    height: dotSize,
                     margin: EdgeInsets.only(
-                      right: i == dots.length - 1 ? 0 : gap,
+                      right: i == dots.length - 1 ? 0 : dotGap,
                     ),
                     decoration: BoxDecoration(
                       color: dots[i].color,
@@ -1486,26 +1935,132 @@ class _WeeklyCalendarBox extends StatelessWidget {
 
 Widget _kv(String k, String v) {
   return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 3),
+    padding: const EdgeInsets.symmetric(vertical: 4),
     child: Row(
       children: [
         Expanded(
           child: Text(
             k,
             style: const TextStyle(
-              color: Colors.grey,
-              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              color: PaymoaColors.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
         Text(
           v,
           textAlign: TextAlign.right,
-          style: const TextStyle(fontWeight: FontWeight.w800),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: PaymoaColors.textPrimary,
+          ),
         ),
       ],
     ),
   );
+}
+
+/* ───────────────────────── 오늘 근무 요약 배너 ───────────────────────── */
+
+class _TodayWorkBanner extends StatelessWidget {
+  const _TodayWorkBanner({required this.items});
+
+  final List<({UICalendarSchedule s, UICalendarAlba alba})> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        // 오늘 강조 - 연보라 배경
+        color: PaymoaColors.primary.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: PaymoaColors.primary.withOpacity(0.18),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          // 📅 오늘 라벨
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: PaymoaColors.primary,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: const Text(
+              '오늘',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // 근무 목록 (가로 스크롤)
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: items.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final item = entry.value;
+                  final color = cp.parseColor(item.alba.colorHex);
+                  final start = _fmtHm(item.s.startHour, item.s.startMinute);
+                  final end = _fmtHm(item.s.endHour, item.s.endMinute);
+                  final isNext = (item.s.endHour * 60 + item.s.endMinute) <=
+                      (item.s.startHour * 60 + item.s.startMinute);
+
+                  return Padding(
+                    padding: EdgeInsets.only(left: i == 0 ? 0 : 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 알바 색상 점
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        // "알바명 09:00~18:00"
+                        Text(
+                          '${item.alba.name}  $start~$end${isNext ? '(익일)' : ''}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: PaymoaColors.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        // 구분선 (마지막 아이템 제외)
+                        if (i < items.length - 1) ...[
+                          const SizedBox(width: 10),
+                          Container(
+                            width: 1,
+                            height: 14,
+                            color: PaymoaColors.textTertiary.withOpacity(0.4),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EmptyView extends StatelessWidget {
@@ -1513,29 +2068,42 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.work_outline,
-                size: 64, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text(
-              AppWords.emptyTitle,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w900,
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: PaymoaColors.primary.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.work_outline,
+                size: 64,
+                color: PaymoaColors.primary,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              AppWords.emptyHelp,
+            const SizedBox(height: 24),
+            const Text(
+              '아직 등록된 알바가 없어요',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: PaymoaColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '오른쪽 아래 + 버튼을 눌러\n알바를 추가하거나 매장에 입장해보세요!',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: PaymoaColors.textSecondary,
+                height: 1.5,
               ),
             ),
           ],

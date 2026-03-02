@@ -1,7 +1,7 @@
 // lib/screens/owner/owner_worker_schedule_screen.dart
 import 'package:flutter/material.dart';
 
-import '../../data/owner_schedule_repository.dart';
+import '../../data/firebase_service.dart';
 import '../../models/store_schedule.dart';
 import '../../models/store_worker.dart';
 
@@ -29,7 +29,7 @@ class OwnerWorkerScheduleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repo = OwnerScheduleRepository();
+    final repo = FirebaseService();
     final displayName = _displayName(worker);
 
     return Scaffold(
@@ -114,7 +114,7 @@ class _DayCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

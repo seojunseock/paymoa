@@ -49,7 +49,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
     super.dispose();
   }
 
-  String _normalizeCode(String s) => s.trim().toUpperCase().replaceAll(' ', '');
+  String _normalizeCode(String s) => s.trim().replaceAll(' ', '');
 
   int? _toInt(dynamic v) {
     if (v == null) return null;
@@ -275,7 +275,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
                       },
                       autocorrect: false,
                       enableSuggestions: false,
-                      textCapitalization: TextCapitalization.characters,
+                      textCapitalization: TextCapitalization.none,
                       decoration: InputDecoration(
                         hintText: '예) MJ983N7A',
                         filled: true,

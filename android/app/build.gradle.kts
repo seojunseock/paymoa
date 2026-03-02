@@ -1,5 +1,6 @@
 // android/app/build.gradle.kts
 import java.io.File
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -8,6 +9,12 @@ plugins {
     // END: FlutterFire Configuration
     id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// ✅ 릴리즈 키스토어 읽기
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) load(keystorePropertiesFile.inputStream())
 }
 
 android {
@@ -27,19 +34,28 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 에뮬레이터(x86_64)만 사용 – 한 곳에서만 지정
         ndk {
             abiFilters.clear()
-            abiFilters += listOf("x86_64")
+            // ✅ 에뮬레이터(x86_64) + 실기기(arm64, armv7) 모두 지원
+            // Play Store 배포 시 flutter build appbundle 사용 → ABI 자동 분리
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
 
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+
     buildTypes {
         release {
-            // 데모용: 디버그 키로 서명
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")
@@ -99,4 +115,25 @@ val copyDebugApkToFlutterOut by tasks.registering(Copy::class) {
 tasks.named("assemble") { finalizedBy(copyDebugApkToFlutterOut) }
 tasks.matching { it.name == "assembleDebug" || it.name == "packageDebug" }.all {
     finalizedBy(copyDebugApkToFlutterOut)
+}
+
+/**
+ * ✅ 후처리: 생성된 AAB를 Flutter가 기대하는 경로로 복사
+ *   실제 생성: android/app/build/outputs/bundle/release/app-release.aab
+ *   Flutter 기대: <프로젝트루트>/build/app/outputs/bundle/release/app-release.aab
+ */
+val flutterBundleOutDir = File(projectRoot, "build/app/outputs/bundle/release")
+
+afterEvaluate {
+    tasks.findByName("bundleRelease")?.doLast {
+        val src = layout.buildDirectory.file("outputs/bundle/release/app-release.aab").get().asFile
+        if (src.exists()) {
+            if (!flutterBundleOutDir.exists()) flutterBundleOutDir.mkdirs()
+            val dest = File(flutterBundleOutDir, "app-release.aab")
+            src.copyTo(dest, overwrite = true)
+            logger.lifecycle("✅ AAB copied: ${src.absolutePath} -> ${dest.absolutePath}")
+        } else {
+            logger.lifecycle("⚠️  AAB not found at: ${src.absolutePath}")
+        }
+    }
 }

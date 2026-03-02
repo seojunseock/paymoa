@@ -17,8 +17,9 @@ MonthlySummary computeMonthlySummary({
   required List<UICalendarSchedule> schedules,
   required TaxConfig tax,
   required InsuranceConfig insurance,
-  required SurchargePolicy policy,
+  required SurchargePolicy policy, // 기본 정책 (이력 없을 때 폴백)
   int Function(String albaId, DateTime dateLocal)? wageAt,
+  SurchargePolicy Function(DateTime date)? surchargeAt, // ✅ 날짜별 정책 이력
 }) {
   final year = ymYear ?? ymDate?.year;
   final month = ymMonth ?? ymDate?.month;
@@ -34,10 +35,17 @@ MonthlySummary computeMonthlySummary({
   final Map<DateTime, Set<String>> weeklyWorkDays = {}; // 주별 근로일(날짜 set)
 
   int gross = 0;
+  // 주별 스케줄 목록 (weeklyOver40 계산용)
+  final Map<DateTime, List<UICalendarSchedule>> weeklyScheduleMap = {};
 
   for (final s in monthSchedules) {
-    final pay =
-        computeSinglePay(alba: alba, s: s, policy: policy, wageAt: wageAt);
+    final pay = computeSinglePay(
+      alba: alba,
+      s: s,
+      policy: policy,
+      wageAt: wageAt,
+      surchargeAt: surchargeAt, // ✅ 날짜별 정책
+    );
     gross += pay;
 
     final start = DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
@@ -45,33 +53,61 @@ MonthlySummary computeMonthlySummary({
     if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
 
     final workedMin =
-        end.difference(start).inMinutes - s.breakMinutes.clamp(0, 1440);
+        max(0, end.difference(start).inMinutes - s.breakMinutes.clamp(0, 1440));
 
     final weekStart = _mondayOf(start);
     weeklyMinutes[weekStart] = (weeklyMinutes[weekStart] ?? 0) + workedMin;
+    (weeklyScheduleMap[weekStart] ??= []).add(s);
 
     // 근로일(시작일 기준)만 MVP로 카운트(실무에서 충분히 안정적)
     final dayKey = _ymdOf(DateTime(s.year, s.month, s.day));
     (weeklyWorkDays[weekStart] ??= <String>{}).add(dayKey);
   }
 
-  // ✅ 주휴수당 (한국: 1주 소정근로시간 15시간 이상이면 발생)
-  if (policy.weeklyHolidayEnabled) {
-    weeklyMinutes.forEach((weekStart, mins) {
-      if (mins >= 15 * 60) {
-        final refWage = wageAt?.call(alba.id, weekStart) ?? alba.hourlyWage;
+  // ✅ 주 40시간 초과 연장수당 (weeklyOver40)
+  // computeSinglePay에서 dailyOver8은 이미 처리됨
+  // weeklyOver40은 주 단위로만 계산 가능하므로 여기서 처리
+  // ✅ 주 40시간 초과 연장수당 - 주 시작일 기준 정책 사용
+  weeklyMinutes.forEach((weekStart, totalMins) {
+    final weekPolicy = surchargeAt?.call(weekStart) ?? policy;
+    if (!weekPolicy.overtimeEnabled ||
+        weekPolicy.overtimeRule != OvertimeRule.weeklyOver40) return;
+    final overMins = max(0, totalMins - 40 * 60);
+    if (overMins <= 0) return;
 
-        final paidMinutes = _weeklyHolidayPaidMinutes(
-          policy: policy,
-          weekStart: weekStart,
-          weeklyWorkedMinutes: mins,
-          weeklyWorkDays: weeklyWorkDays[weekStart] ?? const <String>{},
-        );
+    final ws = weeklyScheduleMap[weekStart] ?? [];
+    final overrides =
+        ws.map((s) => s.overrideHourlyWage).whereType<int>().toList();
+    final refWage = overrides.isNotEmpty
+        ? (overrides.reduce((a, b) => a + b) / overrides.length).round()
+        : (wageAt?.call(alba.id, weekStart) ?? alba.hourlyWage);
 
-        gross += (refWage * (paidMinutes / 60.0)).round();
-      }
-    });
-  }
+    gross += (refWage * (weekPolicy.overtimePercent / 100.0) * overMins / 60.0)
+        .round();
+  });
+
+  // ✅ 주휴수당 - 주 시작일 기준 정책 사용
+  weeklyMinutes.forEach((weekStart, mins) {
+    final weekPolicy = surchargeAt?.call(weekStart) ?? policy;
+    if (!weekPolicy.weeklyHolidayEnabled) return;
+    if (mins < 15 * 60) return;
+
+    final ws = weeklyScheduleMap[weekStart] ?? [];
+    final overrides =
+        ws.map((s) => s.overrideHourlyWage).whereType<int>().toList();
+    final refWage = overrides.isNotEmpty
+        ? (overrides.reduce((a, b) => a + b) / overrides.length).round()
+        : (wageAt?.call(alba.id, weekStart) ?? alba.hourlyWage);
+
+    final paidMinutes = _weeklyHolidayPaidMinutes(
+      policy: weekPolicy,
+      weekStart: weekStart,
+      weeklyWorkedMinutes: mins,
+      weeklyWorkDays: weeklyWorkDays[weekStart] ?? const <String>{},
+    );
+
+    gross += (refWage * (paidMinutes / 60.0)).round();
+  });
 
   final net = _applyTaxInsurance(gross: gross, tax: tax, insurance: insurance);
   return MonthlySummary(gross: gross, net: net);
@@ -80,15 +116,21 @@ MonthlySummary computeMonthlySummary({
 int computeSinglePay({
   required UICalendarAlba alba,
   required UICalendarSchedule s,
-  required SurchargePolicy policy,
+  required SurchargePolicy policy, // 기본 정책 (이력 없을 때 폴백)
   int Function(String albaId, DateTime dateLocal)? wageAt,
+  SurchargePolicy Function(DateTime date)? surchargeAt, // ✅ 날짜별 정책 이력
 }) {
   final start = DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
   var end = DateTime(s.year, s.month, s.day, s.endHour, s.endMinute);
   if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
 
-  final baseWage = wageAt?.call(alba.id, DateTime(s.year, s.month, s.day)) ??
-      alba.hourlyWage;
+  // ✅ 날짜별 정책 이력 → 없으면 기본 policy 사용
+  final scheduleDate = DateTime(s.year, s.month, s.day);
+  final effectivePolicy = surchargeAt?.call(scheduleDate) ?? policy;
+
+  // ✅ 우선순위: 스케줄별 override → wageAt(날짜별 시급) → 알바 기본 시급
+  final baseWage = s.overrideHourlyWage ??
+      (wageAt?.call(alba.id, scheduleDate) ?? alba.hourlyWage);
 
   final totalMin = end.difference(start).inMinutes;
   final workedMin = max(0, totalMin - s.breakMinutes.clamp(0, 1440));
@@ -98,31 +140,34 @@ int computeSinglePay({
   int overtimePay = 0, nightPay = 0, holidayPay = 0;
 
   // ✅ 연장근로(옵션)
-  if (policy.overtimeEnabled) {
+  if (effectivePolicy.overtimeEnabled) {
     final overtimeMin = _overtimeMinutes(
-      policy: policy,
+      policy: effectivePolicy,
       workedMin: workedMin,
       // weeklyOver40는 추후 period/week 집계 기반으로 확장
     );
-    overtimePay =
-        (baseWage * (policy.overtimePercent / 100.0) * overtimeMin / 60.0)
-            .round();
+    overtimePay = (baseWage *
+            (effectivePolicy.overtimePercent / 100.0) *
+            overtimeMin /
+            60.0)
+        .round();
   }
 
   // ✅ 야간근로(22:00~06:00)
-  if (policy.nightEnabled) {
+  if (effectivePolicy.nightEnabled) {
     final nightMin = _overlapMinutesWithNight(start, end);
     nightPay =
-        (baseWage * (policy.nightPercent / 100.0) * nightMin / 60.0).round();
+        (baseWage * (effectivePolicy.nightPercent / 100.0) * nightMin / 60.0)
+            .round();
   }
 
   // ✅ 휴일근로(“휴일=일요일 고정” 제거)
-  if (policy.holidayEnabled) {
+  if (effectivePolicy.holidayEnabled) {
     holidayPay = _holidayPremiumPay(
       baseWage: baseWage,
       start: start,
       end: end,
-      policy: policy,
+      policy: effectivePolicy,
     );
   }
 
@@ -143,9 +188,12 @@ int _applyTaxInsurance({
   if (tax == TaxConfig.day66) taxPct = 6.6;
   if (tax is TaxConfigCustomPercent) taxPct = tax.percent;
 
+  // 2026년 근로자 부담분
+  // 고용보험: 0.9%
+  // 4대보험: 국민연금 4.5% + 건강보험 3.545% + 고용보험 0.9% + 장기요양 0.4546% ≈ 9.4%
   double insPct = 0.0;
-  if (insurance is InsuranceEmploymentOnly) insPct = 1.0;
-  if (insurance is InsuranceFour) insPct = 8.0;
+  if (insurance is InsuranceEmploymentOnly) insPct = 0.9;
+  if (insurance is InsuranceFour) insPct = 9.4;
 
   return (gross * (1 - (taxPct + insPct) / 100.0)).round();
 }

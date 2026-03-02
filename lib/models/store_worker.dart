@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../policies/policies.dart' as pol;
 import '../policies/policy_mapper.dart' as pm;
+import 'policy_history.dart';
 import 'store.dart';
 
 class StoreWorker {
@@ -29,6 +30,9 @@ class StoreWorker {
   final DateTime? updatedAt;
   final DateTime? endedAt;
 
+  /// ✅ 정책 변경 이력 (날짜별 가산정책 계산용)
+  final PolicyHistory policyHistory;
+
   const StoreWorker({
     required this.workerUid,
     this.displayName,
@@ -41,6 +45,7 @@ class StoreWorker {
     this.joinedAt,
     this.updatedAt,
     this.endedAt,
+    this.policyHistory = const PolicyHistory.empty_(),
   });
 
   bool get isActive => status != 'ended';
@@ -53,6 +58,18 @@ class StoreWorker {
     final storeWage = store.defaultHourlyWage ?? 0;
     if (inheritFromStore) return storeWage;
     return hourlyWage ?? storeWage;
+  }
+
+  /// ✅ 날짜 기반 시급 조회 (policyHistory 우선 → hourlyWage → 매장 기본값)
+  /// 근무 저장/급여 계산 시 반드시 이 메서드를 사용해야 과거 데이터가 오염되지 않음
+  int effectiveHourlyWageAt(Store store, DateTime date) {
+    final storeWage = store.defaultHourlyWage ?? 0;
+    if (inheritFromStore) {
+      // 매장 기본값도 이력이 있으면 날짜 기반 조회
+      return store.policyHistory.wageAt(date) ?? storeWage;
+    }
+    // 개인 이력 → 고정 시급 → 매장 기본값 순서
+    return policyHistory.wageAt(date) ?? hourlyWage ?? storeWage;
   }
 
   int effectivePayDay(Store store) {
@@ -121,6 +138,7 @@ class StoreWorker {
       joinedAt: _dt(json['joinedAt']),
       updatedAt: _dt(json['updatedAt']),
       endedAt: _dt(json['endedAt']),
+      policyHistory: PolicyHistory.fromList(json['policyHistory']),
     );
   }
 
@@ -149,6 +167,10 @@ class StoreWorker {
       if (joinedAt != null) 'joinedAt': Timestamp.fromDate(joinedAt!),
       if (updatedAt != null) 'updatedAt': Timestamp.fromDate(updatedAt!),
       if (endedAt != null) 'endedAt': Timestamp.fromDate(endedAt!),
+      // ✅ 정책 이력 저장 (날짜 기반 시급·정책 계산의 핵심)
+      if (policyHistory.isNotEmpty)
+        'policyHistory':
+            policyHistory.entries.map((e) => e.toFirestoreEntry()).toList(),
     };
   }
 
@@ -164,6 +186,7 @@ class StoreWorker {
     DateTime? joinedAt,
     DateTime? updatedAt,
     DateTime? endedAt,
+    PolicyHistory? policyHistory,
   }) {
     return StoreWorker(
       workerUid: workerUid ?? this.workerUid,
@@ -177,6 +200,7 @@ class StoreWorker {
       joinedAt: joinedAt ?? this.joinedAt,
       updatedAt: updatedAt ?? this.updatedAt,
       endedAt: endedAt ?? this.endedAt,
+      policyHistory: policyHistory ?? this.policyHistory,
     );
   }
 }
