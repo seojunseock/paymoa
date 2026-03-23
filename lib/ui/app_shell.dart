@@ -1,5 +1,6 @@
 // lib/ui/app_shell.dart
 import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
 import '../policies/policy_sheet.dart';
 
 import 'package:flutter/material.dart';
@@ -41,8 +42,10 @@ import '../payroll/payroll_policy_mapper.dart' as ppm;
 // join sheet models
 import '../screens/join_store_sheet.dart';
 
-// role (SharedPrefs)
+// role / consent
 import '../role/role_repository.dart';
+import '../role/consent_repository.dart';
+import '../ads/ad_service.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -63,21 +66,15 @@ class _AppShellState extends State<AppShell> {
   // ✅ 개인 알바 정책 Firebase 복원용 구독
   StreamSubscription<Map<String, Map<String, dynamic>>>? _policyRestoreSub;
 
-  // ────────────────────────────────────────────────────────────────
-  // ✅ [BUG FIX] 스트림을 build() 안에서 매번 새로 생성하면 리빌드마다
-  //    Firestore 구독이 폭증한다. uid별로 캐시해서 한 번만 생성한다.
-  // ────────────────────────────────────────────────────────────────
   String? _cachedUid;
   Stream<List<UICalendarAlba>>? _albasMergedStream;
   Stream<_JoinPolicyBundle>? _joinPolicyBundleStream;
   Stream<List<UICalendarSchedule>>? _schedulesStream;
 
-  /// uid가 바뀐 경우에만 새 스트림을 만든다.
   void _initStreamsIfNeeded(String uid) {
     if (_cachedUid == uid) return;
     _cachedUid = uid;
 
-    // activeJoins$ 를 한 번만 만들어 schedules 스트림에 전달
     final activeJoins$ = _firebaseService.watchActiveJoinPaths(uid);
 
     _albasMergedStream = _watchMyAlbasMerged(uid);
@@ -85,7 +82,6 @@ class _AppShellState extends State<AppShell> {
     _schedulesStream = _firebaseService.watchMySchedulesUiMergedV2(
       workerUid: uid,
       activeJoins$: activeJoins$,
-      recentDays: 365,
     );
   }
 
@@ -104,7 +100,6 @@ class _AppShellState extends State<AppShell> {
         .listen((policyMap) {
       if (!mounted) return;
 
-      // ✅ 최초 1회만이 아닌 항상 동기화 (앱 재시작 없이 정책 반영)
       setState(() {
         for (final entry in policyMap.entries) {
           final albaId = entry.key;
@@ -114,7 +109,6 @@ class _AppShellState extends State<AppShell> {
           final ins = pm.insuranceConfigFromPolicy(policy);
           final sur = pm.surchargePolicyFromPolicy(policy);
 
-          // ✅ payrollPolicy도 복원
           PayrollPolicy? payroll;
           final rawPayroll = policy['payrollPolicy'];
           if (rawPayroll is Map) {
@@ -124,13 +118,12 @@ class _AppShellState extends State<AppShell> {
             } catch (_) {}
           }
 
-          // ✅ policyHistory 파싱
           final rawHist = policy['_policyHistory'];
           final hist = PolicyHistory.fromList(rawHist);
 
           final old = _overridesByAlbaId[albaId];
           _overridesByAlbaId[albaId] = (old ?? const _AlbaOverrides()).copyWith(
-            inheritFromStore: false, // ✅ 개인 알바는 항상 자체 설정 사용
+            inheritFromStore: false,
             tax: tax,
             insurance: ins,
             surcharge: sur,
@@ -148,9 +141,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // ✅ 알림 과호출 방지: debounce + signature + suspend
-  // ─────────────────────────────────────────────
   Timer? _notiDebounce;
   String _lastNotiSignature = '';
   bool _suspendNoti = false;
@@ -220,15 +210,10 @@ class _AppShellState extends State<AppShell> {
           ),
         );
         _lastNotiSignature = sig2;
-      } catch (_) {
-        // silent
-      }
+      } catch (_) {}
     });
   }
 
-  // ─────────────────────────────────────────────
-  // storeJoins 정책 bundle
-  // ─────────────────────────────────────────────
   Stream<_JoinPolicyBundle> _watchJoinPolicyBundle(String myUid) {
     final col = FirebaseFirestore.instance
         .collection('users')
@@ -241,7 +226,7 @@ class _AppShellState extends State<AppShell> {
       final surByStoreId = <String, pol.SurchargePolicy?>{};
       final payrollByStoreId = <String, PayrollPolicy>{};
       final inheritByStoreId = <String, bool>{};
-      final histByStoreId = <String, PolicyHistory>{}; // ✅ 정책 이력
+      final histByStoreId = <String, PolicyHistory>{};
 
       for (final d in snap.docs) {
         final m = d.data();
@@ -252,11 +237,9 @@ class _AppShellState extends State<AppShell> {
         final st = (m['status'] as String?)?.trim().toLowerCase();
         if (st != null && st.isNotEmpty && st != 'active') continue;
 
-        // ✅ 사장님이 saveWorkerSettings로 저장한 ownerSetting 우선 적용
         final ownerSetting =
             (m['ownerSetting'] as Map?)?.cast<String, dynamic>();
 
-        // inherit: ownerSetting → storeJoins 순서로 우선
         final inherit = ownerSetting != null
             ? (ownerSetting['inheritFromStore'] as bool?) ??
                 (m['inheritFromStore'] as bool?) ??
@@ -264,7 +247,6 @@ class _AppShellState extends State<AppShell> {
             : (m['inheritFromStore'] as bool?) ?? true;
         inheritByStoreId[storeId] = inherit;
 
-        // policy: ownerSetting이 있으면 ownerSetting['policy'] 우선
         final policy = (ownerSetting != null && ownerSetting['policy'] is Map)
             ? (ownerSetting['policy'] as Map).cast<String, dynamic>()
             : (m['policy'] as Map?)?.cast<String, dynamic>() ??
@@ -274,7 +256,6 @@ class _AppShellState extends State<AppShell> {
         insByStoreId[storeId] = pm.insuranceConfigFromPolicy(policy);
         surByStoreId[storeId] = pm.surchargePolicyFromPolicy(policy);
 
-        // ✅ policyHistory 파싱 (storeJoins에 저장된 이력)
         final rawHist = m['policyHistory'];
         final hist = PolicyHistory.fromList(rawHist);
         if (hist.isNotEmpty) histByStoreId[storeId] = hist;
@@ -288,7 +269,6 @@ class _AppShellState extends State<AppShell> {
           if (raw2 is Map) rawPayroll = raw2.cast<String, dynamic>();
         }
 
-        // payDay: ownerSetting 우선
         final payDay =
             (_toInt(ownerSetting?['payDay']) ?? _toInt(m['payDay']) ?? 25)
                 .clamp(1, 31);
@@ -297,7 +277,6 @@ class _AppShellState extends State<AppShell> {
             : _fallbackPayrollPolicyByPayDay(payDay);
       }
 
-      // ✅ policyHistory에서 시급 밴드 빌드 (날짜별 wageAt 정확성)
       final wageBandsByStoreId = <String, List<_WageBand>>{};
       for (final entry in histByStoreId.entries) {
         final histEntries = entry.value.entries
@@ -319,8 +298,6 @@ class _AppShellState extends State<AppShell> {
             .where((b) => b.wage > 0)
             .toList();
 
-        // ✅ 1970-01-01 초기 밴드가 policyHistory에 직접 저장됨
-        // previousHourlyWage 추가 로직 불필요
         if (bands.isNotEmpty) wageBandsByStoreId[entry.key] = bands;
       }
 
@@ -351,11 +328,7 @@ class _AppShellState extends State<AppShell> {
   pol.TaxConfig _resolvedTaxOf(UICalendarAlba alba, _JoinPolicyBundle bundle) {
     final ov = _ov(alba.id);
     if (ov != null && !ov.inheritFromStore && ov.tax != null) return ov.tax!;
-    final inherit = bundle.inheritByStoreId[alba.id];
-    if (inherit == true) {
-      return bundle.taxByStoreId[alba.id] ?? pol.TaxConfig.none;
-    }
-    return pol.TaxConfig.none;
+    return bundle.taxByStoreId[alba.id] ?? pol.TaxConfig.none;
   }
 
   pol.InsuranceConfig _resolvedInsOf(
@@ -364,11 +337,7 @@ class _AppShellState extends State<AppShell> {
     if (ov != null && !ov.inheritFromStore && ov.insurance != null) {
       return ov.insurance!;
     }
-    final inherit = bundle.inheritByStoreId[alba.id];
-    if (inherit == true) {
-      return bundle.insByStoreId[alba.id] ?? const pol.InsuranceNone();
-    }
-    return const pol.InsuranceNone();
+    return bundle.insByStoreId[alba.id] ?? const pol.InsuranceNone();
   }
 
   pol.SurchargePolicy _resolvedSurchargeOf(
@@ -377,40 +346,83 @@ class _AppShellState extends State<AppShell> {
     if (ov != null && !ov.inheritFromStore && ov.surcharge != null) {
       return ov.surcharge!;
     }
-    final inherit = bundle.inheritByStoreId[alba.id];
-    if (inherit == true) {
-      return bundle.surByStoreId[alba.id] ?? const pol.SurchargePolicy();
-    }
-    return const pol.SurchargePolicy();
+    return bundle.surByStoreId[alba.id] ?? const pol.SurchargePolicy();
   }
 
-  /// ✅ 날짜별 가산정책 콜백 (computeMonthlySummary/Engine 전달용)
   pol.SurchargePolicy Function(DateTime)? _surchargeAtOf(
       UICalendarAlba alba, _JoinPolicyBundle bundle) {
     final ov = _ov(alba.id);
-    // 개인 설정 알바: _AlbaOverrides.surchargeAt 사용
     if (ov != null && !ov.inheritFromStore) {
-      if (ov.policyHistory.isEmpty) return null;
-      return (date) => ov.surchargeAt(date) ?? const pol.SurchargePolicy();
-    }
-    // 매장 정책 상속: joinBundle.surchargeAt 사용
-    final inherit = bundle.inheritByStoreId[alba.id];
-    if (inherit == true) {
-      final hist = bundle.histByStoreId[alba.id];
-      if (hist == null || hist.isEmpty) return null;
+      final storeHist = bundle.histByStoreId[alba.id];
       final fallback =
           bundle.surByStoreId[alba.id] ?? const pol.SurchargePolicy();
-      return (date) => hist.surchargeAt(date) ?? fallback;
+      if (ov.policyHistory.isEmpty) {
+        if (storeHist == null || storeHist.isEmpty) return null;
+        return (date) => storeHist.surchargeAt(date) ?? fallback;
+      }
+      return (date) {
+        final ind = ov.surchargeAt(date);
+        if (ind != null) return ind;
+        return storeHist?.surchargeAt(date) ?? fallback;
+      };
     }
-    return null;
+    final hist = bundle.histByStoreId[alba.id];
+    if (hist == null || hist.isEmpty) return null;
+    final fallback =
+        bundle.surByStoreId[alba.id] ?? const pol.SurchargePolicy();
+    return (date) => hist.surchargeAt(date) ?? fallback;
   }
 
-  /// ✅ 개인 알바(비조인)용 surchargeAt
   pol.SurchargePolicy Function(DateTime)? _personalSurchargeAtOf(
       String albaId) {
     final ov = _ov(albaId);
     if (ov == null || ov.policyHistory.isEmpty) return null;
     return (date) => ov.surchargeAt(date) ?? const pol.SurchargePolicy();
+  }
+
+  pol.TaxConfig Function(DateTime)? _taxAtOf(
+      UICalendarAlba alba, _JoinPolicyBundle bundle) {
+    final ov = _ov(alba.id);
+    if (ov != null && !ov.inheritFromStore) {
+      final storeHist = bundle.histByStoreId[alba.id];
+      final fallback = bundle.taxByStoreId[alba.id] ?? pol.TaxConfig.none;
+      if (ov.policyHistory.isEmpty) {
+        if (storeHist == null || storeHist.isEmpty) return null;
+        return (date) => storeHist.taxAt(date) ?? fallback;
+      }
+      return (date) {
+        final ind = ov.policyHistory.taxAt(date);
+        if (ind != null) return ind;
+        return storeHist?.taxAt(date) ?? fallback;
+      };
+    }
+    final hist = bundle.histByStoreId[alba.id];
+    if (hist == null || hist.isEmpty) return null;
+    final fallback = bundle.taxByStoreId[alba.id] ?? pol.TaxConfig.none;
+    return (date) => hist.taxAt(date) ?? fallback;
+  }
+
+  pol.InsuranceConfig Function(DateTime)? _insuranceAtOf(
+      UICalendarAlba alba, _JoinPolicyBundle bundle) {
+    final ov = _ov(alba.id);
+    if (ov != null && !ov.inheritFromStore) {
+      final storeHist = bundle.histByStoreId[alba.id];
+      final fallback =
+          bundle.insByStoreId[alba.id] ?? const pol.InsuranceNone();
+      if (ov.policyHistory.isEmpty) {
+        if (storeHist == null || storeHist.isEmpty) return null;
+        return (date) => storeHist.insuranceAt(date) ?? fallback;
+      }
+      return (date) {
+        final ind = ov.policyHistory.insuranceAt(date);
+        if (ind != null) return ind;
+        return storeHist?.insuranceAt(date) ?? fallback;
+      };
+    }
+    final hist = bundle.histByStoreId[alba.id];
+    if (hist == null || hist.isEmpty) return null;
+    final fallback = bundle.insByStoreId[alba.id] ?? const pol.InsuranceNone();
+    return (date) => hist.insuranceAt(date) ?? fallback;
   }
 
   PayrollPolicy _resolvedPayrollPolicyOf(
@@ -419,17 +431,67 @@ class _AppShellState extends State<AppShell> {
     if (ov != null && !ov.inheritFromStore && ov.payrollPolicy != null) {
       return ov.payrollPolicy!;
     }
-    final inherit = bundle.inheritByStoreId[alba.id];
-    if (inherit == true) {
-      return bundle.payrollByStoreId[alba.id] ??
-          _fallbackPayrollPolicyByPayDay(alba.payDay);
-    }
-    return _fallbackPayrollPolicyByPayDay(alba.payDay);
+    return bundle.payrollByStoreId[alba.id] ??
+        _fallbackPayrollPolicyByPayDay(alba.payDay);
   }
 
-  // ─────────────────────────────────────────────
-  // 알바 리스트: join + personal merge
-  // ─────────────────────────────────────────────
+  // ✅ 추가: MyInfoScreen에 넘길 최근 3개월 최종 실수령 합계
+  List<MyInfoMonthlyNetPoint> _buildMyInfoMonthlyNetPoints({
+    required List<UICalendarAlba> albas,
+    required List<UICalendarSchedule> schedules,
+    required _JoinPolicyBundle joinBundle,
+  }) {
+    final engine = const PayrollEngine();
+    final now = DateTime.now();
+    final points = <MyInfoMonthlyNetPoint>[];
+
+    for (int offset = 2; offset >= 0; offset--) {
+      final dt = DateTime(now.year, now.month - offset, 1);
+      int monthNet = 0;
+
+      for (final alba in albas) {
+        final albaSchedules =
+            schedules.where((s) => s.albaId == alba.id).toList(growable: false);
+
+        final tax = _resolvedTaxOf(alba, joinBundle);
+        final ins = _resolvedInsOf(alba, joinBundle);
+        final sur = _resolvedSurchargeOf(alba, joinBundle);
+        final payroll = _resolvedPayrollPolicyOf(alba, joinBundle);
+
+        final summary = engine.summaryForDate(
+          policy: payroll,
+          alba: alba,
+          schedules: albaSchedules,
+          tax: tax,
+          insurance: ins,
+          surchargePolicy: sur,
+          surchargeAt: _surchargeAtOf(alba, joinBundle),
+          taxAt: _taxAtOf(alba, joinBundle),
+          insuranceAt: _insuranceAtOf(alba, joinBundle),
+          wageAt: (albaId, dateLocal) => wageAt(
+            albaId,
+            dateLocal,
+            albas,
+            wageBandsByStoreId: joinBundle.wageBandsByStoreId,
+          ),
+          anyDateInPeriod: dt,
+        );
+
+        monthNet += summary.net;
+      }
+
+      points.add(
+        MyInfoMonthlyNetPoint(
+          year: dt.year,
+          month: dt.month,
+          net: monthNet,
+        ),
+      );
+    }
+
+    return points;
+  }
+
   Stream<List<UICalendarAlba>> _watchMyAlbasMerged(String uid) {
     final join$ = _firebaseService.watchMyAlbas(uid);
     final personal$ = _firebaseService.watchMyPersonalAlbas(uid);
@@ -477,9 +539,6 @@ class _AppShellState extends State<AppShell> {
     return controller.stream;
   }
 
-  // ─────────────────────────────────────────────
-  // joinPath 찾기(매장 스케줄 경로 필요)
-  // ─────────────────────────────────────────────
   Future<_JoinPath?> _findJoinPathByStoreId({
     required String myUid,
     required String storeId,
@@ -512,9 +571,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // ✅ WorkEditor 연결 (AppNav로 통일)
-  // ─────────────────────────────────────────────
   Future<void> _openWorkEditor(
     wargs.WorkEditorArgs args, {
     required List<UICalendarAlba> albas,
@@ -568,6 +624,35 @@ class _AppShellState extends State<AppShell> {
         onUpdate: (s) async {
           final user = FirebaseAuth.instance.currentUser;
           if (user == null) throw StateError('로그인이 필요합니다.');
+
+          // 매장(albaId)이 바뀐 경우: 기존 스케줄 삭제 후 새 위치에 추가
+          final original =
+              schedules.where((x) => x.id == s.id).firstOrNull;
+          if (original != null && original.albaId != s.albaId) {
+            await _firebaseService.deleteScheduleSmart(
+                workerUid: user.uid, ui: original);
+
+            final newStoreId = s.albaId;
+            final path = await _findJoinPathByStoreId(
+                myUid: user.uid, storeId: newStoreId);
+            if (path != null) {
+              await _firebaseService.addOneFromUi(
+                ownerUid: path.ownerUid,
+                storeId: path.storeId,
+                workerUid: user.uid,
+                employmentId: path.employmentId,
+                ui: s,
+              );
+            } else {
+              await _firebaseService.addOneFromUi(
+                workerUid: user.uid,
+                employmentId: null,
+                ui: s,
+              );
+            }
+            return;
+          }
+
           await _firebaseService.updateScheduleSmart(
               workerUid: user.uid, ui: s);
         },
@@ -583,16 +668,18 @@ class _AppShellState extends State<AppShell> {
               workerUid: user.uid, ui: s);
         },
         onUpdatePolicy: (albaId, res) async {
-          // ✅ [권한 가드] 조인 매장은 정책 수정 불가 (사장님만 가능)
           final targetAlba = albas.firstWhere(
             (a) => a.id == albaId,
             orElse: () => const UICalendarAlba(
-                id: '', storeId: '', name: '', colorHex: '#9CA3AF',
-                hourlyWage: 0, payDay: 25),
+                id: '',
+                storeId: '',
+                name: '',
+                colorHex: '#9CA3AF',
+                hourlyWage: 0,
+                payDay: 25),
           );
           if (targetAlba.storeId.isNotEmpty) return;
 
-          // ✅ 정책 변경 후 Firestore 재구독으로 policyHistory 자동 반영
           setState(() {
             final old = _overridesByAlbaId[albaId];
             _overridesByAlbaId[albaId] =
@@ -604,7 +691,6 @@ class _AppShellState extends State<AppShell> {
             );
           });
         },
-        // ✅ 날짜 기반 시급: 근무 저장 시 날짜로 policyHistory 조회 → overrideHourlyWage 자동 결정
         wageAt: (albaId, dateLocal) => wageAt(
           albaId,
           dateLocal,
@@ -620,15 +706,11 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // ✅ 알바 수정 → AlbaFormScreen (기존 데이터 로드)
-  // ─────────────────────────────────────────────
   void _openEditAlbaForm({
     required UICalendarAlba alba,
     required _JoinPolicyBundle joinBundle,
     required List<UICalendarSchedule> schedules,
   }) {
-    // ✅ [권한 가드] 조인 매장은 수정 화면 진입 불가 (사장님만 가능)
     if (alba.storeId.isNotEmpty) return;
 
     final tax = _resolvedTaxOf(alba, joinBundle);
@@ -651,7 +733,7 @@ class _AppShellState extends State<AppShell> {
       endHour24: 18,
       endMinute: 0,
       breakMinutes: 0,
-      selectedDates: {}, // 수정 모드에서 날짜 추가는 work_editor로
+      selectedDates: {},
       colorHex: alba.colorHex,
       payDay: alba.payDay,
       inheritFromStore: ov?.inheritFromStore ?? isJoin,
@@ -672,8 +754,6 @@ class _AppShellState extends State<AppShell> {
 
           try {
             if (!isJoin) {
-              // ① 개인 알바: 과거 스케줄 보호 후 새 시급 저장
-              // ✅ effectiveFrom이 미래 날짜면 그 이전 스케줄에 기존 시급 고정
               final wageChanged = res.hourlyWage != alba.hourlyWage;
               final hasEffectiveFrom =
                   !res.wageOnlyToday && res.wageEffectiveFrom != null;
@@ -681,12 +761,11 @@ class _AppShellState extends State<AppShell> {
               if (wageChanged && hasEffectiveFrom) {
                 final today = DateTime.now();
                 final todayDate = DateTime(today.year, today.month, today.day);
-                // ✅ 오늘부터 포함 → !isBefore
                 if (!res.wageEffectiveFrom!.isBefore(todayDate)) {
                   await _firebaseService.bulkUpdateScheduleWage(
                     workerUid: user.uid,
                     albaId: alba.id,
-                    newWage: alba.hourlyWage, // 기존 시급으로 과거 고정
+                    newWage: alba.hourlyWage,
                     schedules: schedules,
                     fromDate: DateTime(1970),
                     untilDate: res.wageEffectiveFrom,
@@ -700,6 +779,12 @@ class _AppShellState extends State<AppShell> {
                 surcharge: res.surcharge,
                 payrollPolicy: res.payrollPolicy,
               );
+              final prevPolicyMap = pm.buildPolicyMap(
+                tax: tax,
+                insurance: ins,
+                surcharge: sur,
+                payrollPolicy: payroll,
+              );
               await _firebaseService.updatePersonalAlbaWithPolicy(
                 uid: user.uid,
                 albaId: alba.id,
@@ -707,35 +792,32 @@ class _AppShellState extends State<AppShell> {
                     ? '이름없음'
                     : res.storeName.trim(),
                 hourlyWage: res.hourlyWage,
-                // ✅ 변경 전 시급 + 시급 기준일 → policyHistory 날짜 정확
                 previousHourlyWage: (res.hourlyWage != alba.hourlyWage)
                     ? alba.hourlyWage
                     : null,
                 colorHex: res.colorHex,
                 payDay: res.payDay,
                 policy: policyMap,
+                previousPolicy: prevPolicyMap,
                 wageEffectiveFrom:
                     (!res.wageOnlyToday && res.wageEffectiveFrom != null)
                         ? res.wageEffectiveFrom
-                        : null, // ✅ 시급 기준일
-                policyEffectiveFrom: res.policyEffectiveFrom, // ✅ 정책 기준일
+                        : null,
+                policyEffectiveFrom: res.policyEffectiveFrom,
               );
             } else {
-              // ② Join 알바: 시급 변경 시 과거 스케줄 보호 후 storeJoins 저장
               if (res.hourlyWage != alba.hourlyWage) {
-                // ✅ effectiveFrom이 미래 날짜면 이전 스케줄에 기존 시급 고정
                 final hasEffectiveFrom =
                     !res.wageOnlyToday && res.wageEffectiveFrom != null;
                 if (hasEffectiveFrom) {
                   final today = DateTime.now();
                   final todayDate =
                       DateTime(today.year, today.month, today.day);
-                  // ✅ 오늘부터 포함 → !isBefore
                   if (!res.wageEffectiveFrom!.isBefore(todayDate)) {
                     await _firebaseService.bulkUpdateScheduleWage(
                       workerUid: user.uid,
                       albaId: alba.id,
-                      newWage: alba.hourlyWage, // 기존 시급으로 과거 고정
+                      newWage: alba.hourlyWage,
                       schedules: schedules,
                       fromDate: DateTime(1970),
                       untilDate: res.wageEffectiveFrom,
@@ -756,9 +838,23 @@ class _AppShellState extends State<AppShell> {
                   );
                 }
               }
+
+              if (res.colorHex != alba.colorHex) {
+                final joinPath = await _findJoinPathByStoreId(
+                  myUid: user.uid,
+                  storeId: alba.storeId,
+                );
+                if (joinPath != null) {
+                  await _firebaseService.updateJoinAlbaColorHex(
+                    workerUid: user.uid,
+                    ownerUid: joinPath.ownerUid,
+                    storeId: alba.storeId,
+                    colorHex: res.colorHex,
+                  );
+                }
+              }
             }
 
-            // ③ 시급이 바뀐 경우 → 해당 날짜 기준 스케줄에 overrideHourlyWage 일괄 적용
             if (res.hourlyWage != alba.hourlyWage &&
                 (res.wageOnlyToday || res.wageEffectiveFrom != null)) {
               await _firebaseService.bulkUpdateScheduleWage(
@@ -771,12 +867,28 @@ class _AppShellState extends State<AppShell> {
               );
             }
 
-            // ③ 메모리 오버라이드도 업데이트 (즉시 반영)
             if (mounted) {
-              // ✅ policyEffectiveFrom이 있으면 새 이력 항목을 메모리에도 반영
               final oldOv =
                   _overridesByAlbaId[alba.id] ?? const _AlbaOverrides();
               PolicyHistory newHist = oldOv.policyHistory;
+
+              if (!isJoin && res.hourlyWage != alba.hourlyWage) {
+                final oldEntry = PolicyHistoryEntry.fromMap({
+                  'hourlyWage': alba.hourlyWage,
+                  'effectiveFrom': '1970-01-01',
+                });
+                if (oldEntry != null) newHist = newHist.append(oldEntry);
+                if (res.wageEffectiveFrom != null) {
+                  final ef = res.wageEffectiveFrom!;
+                  final newEntry = PolicyHistoryEntry.fromMap({
+                    'hourlyWage': res.hourlyWage,
+                    'effectiveFrom':
+                        '${ef.year}-${ef.month.toString().padLeft(2, '0')}-${ef.day.toString().padLeft(2, '0')}',
+                  });
+                  if (newEntry != null) newHist = newHist.append(newEntry);
+                }
+              }
+
               if (!isJoin &&
                   res.policyEffectiveFrom != null &&
                   res.surcharge != null) {
@@ -817,7 +929,7 @@ class _AppShellState extends State<AppShell> {
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('저장 실패: $e')),
+              const SnackBar(content: Text('저장에 실패했어요. 잠시 후 다시 시도해 주세요.')),
             );
           }
         },
@@ -825,9 +937,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // 개인 알바 등록 → Firestore 저장
-  // ─────────────────────────────────────────────
   void _openAlbaFormLocal({
     required List<UICalendarAlba> albas,
     required List<UICalendarSchedule> schedules,
@@ -875,7 +984,6 @@ class _AppShellState extends State<AppShell> {
             hourlyWage: res.hourlyWage,
             colorHex: res.colorHex,
             payDay: res.payDay,
-            // ✅ 신규 등록 시에도 세금·보험·수당·급여정책 함께 저장
             policy: pm.buildPolicyMap(
               tax: res.tax,
               insurance: res.ins,
@@ -909,9 +1017,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // 매장 코드 등록 -> Firestore 저장
-  // ─────────────────────────────────────────────
   Future<void> _onJoinSubmit(
     JoinStoreSheetResult sheet,
     String workerName,
@@ -1039,17 +1144,11 @@ class _AppShellState extends State<AppShell> {
     await batch.commit();
   }
 
-  // ─────────────────────────────────────────────
-  // wage history (로컬 캐시)
-  // ─────────────────────────────────────────────
   int wageAt(String albaId, DateTime dateLocal, List<UICalendarAlba> albas,
       {Map<String, List<_WageBand>>? wageBandsByStoreId,
       Map<String, PolicyHistory>? histByStoreId}) {
-    // ✅ joinBundle의 wageBands 우선 (policyHistory 기반 날짜별 정확한 시급)
-    // ✅ 개인알바는 _overridesByAlbaId.policyHistory에서 wageBands 빌드
     List<_WageBand>? bands = wageBandsByStoreId?[albaId] ?? _wageBands[albaId];
     if (bands == null || bands.isEmpty) {
-      // 개인알바: policyHistory에서 hourlyWage 이력 추출
       final ov = _overridesByAlbaId[albaId];
       if (ov != null && ov.policyHistory.isNotEmpty) {
         final builtBands = ov.policyHistory.entries
@@ -1067,9 +1166,6 @@ class _AppShellState extends State<AppShell> {
             .toList()
           ..sort((a, b) => a.from.compareTo(b.from));
 
-        // ✅ 첫 밴드 이전 구간: previousHourlyWage로 선행 밴드 추가
-        // (기준일 이전 신규 스케줄 추가 시 올바른 시급 반환)
-        // ✅ 1970-01-01 초기 밴드가 저장됨 - previousHourlyWage 추가 불필요
         bands = builtBands;
       }
     }
@@ -1095,32 +1191,18 @@ class _AppShellState extends State<AppShell> {
         break;
       }
     }
-    // 날짜가 첫 밴드보다 이전인 경우:
-    // - previousHourlyWage 밴드(from=1970)가 있으면 그게 last에 들어가 있음 → 정확
-    // - 없으면(처음 저장 시 previousHourlyWage 누락) → 현재 시급 말고 첫 밴드 wage 반환
-    //   (첫 변경 이후의 시급을 이전에도 쓰는 것보다, 첫 밴드 값 그대로가 나음)
-    // 1970-01-01 초기 밴드가 항상 저장되므로 last가 null인 경우는 거의 없음
-    // 혹시 구 데이터(초기 밴드 없음)의 경우: 가장 오래된 밴드 wage 반환
     if (last == null && bands.isNotEmpty) {
       return bands.first.wage;
     }
     return last?.wage ?? alba.hourlyWage;
   }
 
-  // ─────────────────────────────────────────────
-  // Auth actions
-  // ─────────────────────────────────────────────
   Future<void> _logout() async {
     _notiDebounce?.cancel();
     _notiDebounce = null;
     _lastNotiSignature = '';
 
     if (mounted) setState(() => _tab = 0);
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      await RoleRepository().clearRole(user.uid);
-    }
 
     await AuthService.instance.signOut();
   }
@@ -1131,8 +1213,9 @@ class _AppShellState extends State<AppShell> {
 
     final uid = user.uid;
     final db = FirebaseFirestore.instance;
+    final roleRepo = RoleRepository();
+    final consentRepo = ConsentRepository();
 
-    // ① Firestore 데이터 전체 삭제
     try {
       for (final sub in [
         'myAlbas',
@@ -1141,24 +1224,19 @@ class _AppShellState extends State<AppShell> {
         'personalAlbaPolicies',
         'policies',
       ]) {
-        await _deleteCollection(db.collection('users').doc(uid).collection(sub));
+        await _deleteCollection(
+            db.collection('users').doc(uid).collection(sub));
       }
       await db.collection('users').doc(uid).delete();
-    } catch (_) {
-      // Firestore 삭제 실패 시에도 Auth 삭제는 진행
-    }
+    } catch (_) {}
 
-    // ② 카카오 연결 해제 (카카오로 로그인한 경우)
     try {
       await UserApi.instance.unlink();
-    } catch (_) {
-      // 카카오 로그인이 아닌 경우 무시
-    }
+    } catch (_) {}
 
-    // ③ SharedPrefs 역할 삭제
-    await RoleRepository().clearRole(uid);
+    await roleRepo.clearRole(uid);
+    await consentRepo.clearConsent(uid);
 
-    // ④ Firebase Auth 계정 삭제
     try {
       await user.delete();
     } on FirebaseAuthException catch (e) {
@@ -1177,7 +1255,6 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  /// Firestore 컬렉션 전체 삭제 (100건씩 배치)
   Future<void> _deleteCollection(CollectionReference col) async {
     const batchSize = 100;
     while (true) {
@@ -1201,15 +1278,7 @@ class _AppShellState extends State<AppShell> {
         await _findJoinPathByStoreId(myUid: workerUid, storeId: albaId);
 
     if (path != null) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(workerUid)
-          .collection('storeJoins')
-          .doc(albaId)
-          .set(
-        {'status': 'ended', 'updatedAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
+      await _firebaseService.leaveStore(workerUid: workerUid, storeId: albaId);
       return;
     }
 
@@ -1227,9 +1296,6 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // build
-  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -1239,7 +1305,6 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
-    // ✅ [BUG FIX] 매 rebuild마다 새 스트림 생성 → Firestore 구독 폭증 방지
     _initStreamsIfNeeded(user.uid);
 
     return StreamBuilder<List<UICalendarAlba>>(
@@ -1284,7 +1349,6 @@ class _AppShellState extends State<AppShell> {
                           payDay: 25,
                         ),
                       );
-                      // ✅ [권한 가드] 조인 매장은 수정 불가 (사장님만 가능)
                       if (alba.storeId.isNotEmpty) return;
                       _openEditAlbaForm(
                         alba: alba,
@@ -1318,7 +1382,6 @@ class _AppShellState extends State<AppShell> {
                       final u = FirebaseAuth.instance.currentUser;
                       if (u == null) return;
 
-                      // ✅ 확인 다이얼로그는 호출부(alba_start_screen)에서 이미 처리
                       try {
                         await _deleteAlbaFully(
                           workerUid: u.uid,
@@ -1332,7 +1395,7 @@ class _AppShellState extends State<AppShell> {
                       } catch (e) {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('삭제 실패: $e')),
+                          const SnackBar(content: Text('삭제에 실패했어요. 잠시 후 다시 시도해 주세요.')),
                         );
                       }
                     },
@@ -1381,6 +1444,28 @@ class _AppShellState extends State<AppShell> {
                               payDay: 25));
                       return _surchargeAtOf(alba, joinBundle);
                     },
+                    getTaxAt: (albaId) {
+                      final alba = albas.firstWhere((a) => a.id == albaId,
+                          orElse: () => const UICalendarAlba(
+                              id: '',
+                              storeId: '',
+                              name: '',
+                              colorHex: '#9CA3AF',
+                              hourlyWage: 0,
+                              payDay: 25));
+                      return _taxAtOf(alba, joinBundle);
+                    },
+                    getInsuranceAt: (albaId) {
+                      final alba = albas.firstWhere((a) => a.id == albaId,
+                          orElse: () => const UICalendarAlba(
+                              id: '',
+                              storeId: '',
+                              name: '',
+                              colorHex: '#9CA3AF',
+                              hourlyWage: 0,
+                              payDay: 25));
+                      return _insuranceAtOf(alba, joinBundle);
+                    },
                     getPayrollPolicy: (albaId) {
                       final alba = albas.firstWhere((a) => a.id == albaId,
                           orElse: () => const UICalendarAlba(
@@ -1397,7 +1482,7 @@ class _AppShellState extends State<AppShell> {
                         wageBandsByStoreId: joinBundle.wageBandsByStoreId),
                   ),
                   CalendarScreen(
-                    onBack: null, // 바텀탭 - 뒤로가기 없음
+                    onBack: null,
                     albas: albas,
                     schedules: schedules,
                     onDeleteSchedule: (id) async {
@@ -1456,6 +1541,28 @@ class _AppShellState extends State<AppShell> {
                               hourlyWage: 0,
                               payDay: 25));
                       return _surchargeAtOf(alba, joinBundle);
+                    },
+                    getTaxAt: (albaId) {
+                      final alba = albas.firstWhere((a) => a.id == albaId,
+                          orElse: () => const UICalendarAlba(
+                              id: '',
+                              storeId: '',
+                              name: '',
+                              colorHex: '#9CA3AF',
+                              hourlyWage: 0,
+                              payDay: 25));
+                      return _taxAtOf(alba, joinBundle);
+                    },
+                    getInsuranceAt: (albaId) {
+                      final alba = albas.firstWhere((a) => a.id == albaId,
+                          orElse: () => const UICalendarAlba(
+                              id: '',
+                              storeId: '',
+                              name: '',
+                              colorHex: '#9CA3AF',
+                              hourlyWage: 0,
+                              payDay: 25));
+                      return _insuranceAtOf(alba, joinBundle);
                     },
                     getPayrollPolicy: (albaId) {
                       final alba = albas.firstWhere((a) => a.id == albaId,
@@ -1530,13 +1637,20 @@ class _AppShellState extends State<AppShell> {
                               payDay: 25));
                       return _surchargeAtOf(alba, joinBundle);
                     },
-                    payDay: _preferredPayDay(albas),
-                    onOpenTerms: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const TermsScreen()),
+                    // ✅ 추가: 마이 인포는 여기서 만든 최종 금액만 받음
+                    monthlyNetPoints: _buildMyInfoMonthlyNetPoints(
+                      albas: albas,
+                      schedules: schedules,
+                      joinBundle: joinBundle,
                     ),
-                    onOpenPrivacy: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const PrivacyPolicyScreen()),
+                    payDay: _preferredPayDay(albas),
+                    onOpenTerms: () => launchUrl(
+                      Uri.parse('https://funky-mandevilla-5dc.notion.site/Terms-of-Service-9a7d10d5a0394f2a9cee324fe89893a7'),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                    onOpenPrivacy: () => launchUrl(
+                      Uri.parse('https://funky-mandevilla-5dc.notion.site/Privacy-Policy-599f1871c09d40d782e5c1936444f6ac'),
+                      mode: LaunchMode.externalApplication,
                     ),
                     onOpenSupport: () => SupportDialog.show(context),
                     onLogout: () async {
@@ -1545,7 +1659,7 @@ class _AppShellState extends State<AppShell> {
                       } catch (e) {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('로그아웃 실패: $e')),
+                          const SnackBar(content: Text('로그아웃에 실패했어요. 잠시 후 다시 시도해 주세요.')),
                         );
                       }
                     },
@@ -1581,7 +1695,7 @@ class _AppShellState extends State<AppShell> {
                       } catch (e) {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('탈퇴 실패: $e')),
+                          const SnackBar(content: Text('탈퇴에 실패했어요. 잠시 후 다시 시도해 주세요.')),
                         );
                       }
                     },
@@ -1589,7 +1703,15 @@ class _AppShellState extends State<AppShell> {
                 ];
 
                 return Scaffold(
-                  body: IndexedStack(index: _tab, children: pages),
+                  body: SafeArea(
+                    bottom: false,
+                    child: Column(
+                      children: [
+                        const AdBannerWidget(),
+                        Expanded(child: IndexedStack(index: _tab, children: pages)),
+                      ],
+                    ),
+                  ),
                   bottomNavigationBar: NavigationBar(
                     selectedIndex: _tab,
                     onDestinationSelected: (i) => setState(() => _tab = i),
@@ -1656,7 +1778,7 @@ class _AlbaOverrides {
   final pol.InsuranceConfig? insurance;
   final pol.SurchargePolicy? surcharge;
   final PayrollPolicy? payrollPolicy;
-  final PolicyHistory policyHistory; // ✅ 정책 변경 이력
+  final PolicyHistory policyHistory;
 
   const _AlbaOverrides({
     this.inheritFromStore = true,
@@ -1685,7 +1807,6 @@ class _AlbaOverrides {
     );
   }
 
-  /// ✅ 날짜별 가산정책 - policyHistory 이력에서 찾고 없으면 현재 surcharge
   pol.SurchargePolicy? surchargeAt(DateTime date) {
     if (policyHistory.isEmpty) return surcharge;
     return policyHistory.surchargeAt(date) ?? surcharge;
@@ -1705,9 +1826,7 @@ class _JoinPolicyBundle {
   final Map<String, PayrollPolicy> payrollByStoreId;
   final Map<String, bool> inheritByStoreId;
   final Map<String, PolicyHistory> histByStoreId;
-
-  /// ✅ storeId별 시급 밴드 (policyHistory의 hourlyWage 항목에서 빌드)
-  final Map<String, List<_WageBand>> wageBandsByStoreId; // ✅ 정책 변경 이력
+  final Map<String, List<_WageBand>> wageBandsByStoreId;
 
   const _JoinPolicyBundle({
     required this.taxByStoreId,
@@ -1728,7 +1847,6 @@ class _JoinPolicyBundle {
         histByStoreId: {},
       );
 
-  /// ✅ 날짜별 가산정책
   pol.SurchargePolicy? surchargeAt(String storeId, DateTime date) {
     final hist = histByStoreId[storeId];
     if (hist == null || hist.isEmpty) return surByStoreId[storeId];

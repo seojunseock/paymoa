@@ -4,6 +4,20 @@ import 'package:flutter/foundation.dart';
 /// 근무 타입(가산정책 계산에서 사용)
 enum WorkType { basic, substitute, night, overtime, holiday }
 
+extension WorkTypeWeeklyHolidayX on WorkType {
+  bool get countsForWeeklyHoliday {
+    switch (this) {
+      case WorkType.basic:
+        return true;
+      case WorkType.substitute:
+      case WorkType.night:
+      case WorkType.overtime:
+      case WorkType.holiday:
+        return false;
+    }
+  }
+}
+
 /// ✅ 매장(사장님 기준 최상위)
 @immutable
 class UICalendarStore {
@@ -135,6 +149,8 @@ class UICalendarSchedule {
     this.overrideHourlyWage,
     this.docPath, // ✅ 추가
   });
+
+  bool get countsForWeeklyHoliday => workType.countsForWeeklyHoliday;
 
   /// ✅ copyWith에서 overrideHourlyWage를 "null로 리셋"할 수 있게 처리
   /// - overrideHourlyWage: 그대로 두고 싶으면 전달하지 않으면 됨

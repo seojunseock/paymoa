@@ -194,12 +194,15 @@ Widget pmKv(String k, String v, {Color? valueColor}) {
                   fontSize: 16,
                   color: Pm.textSecondary,
                   fontWeight: FontWeight.w500))),
-      Text(v,
-          textAlign: TextAlign.right,
-          style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: valueColor ?? Pm.textPrimary)),
+      const SizedBox(width: 8),
+      Flexible(
+          child: Text(v,
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: valueColor ?? Pm.textPrimary))),
     ]),
   );
 }
@@ -245,6 +248,31 @@ Widget pmActionRow({
         ),
       ),
     ]),
+  );
+}
+
+// ─── 에러 다이얼로그 ──────────────────────────────
+Future<void> showErrorDialog(BuildContext context, String message) {
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.error_outline_rounded, color: Pm.danger, size: 22),
+          SizedBox(width: 8),
+          Text('오류', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        ],
+      ),
+      content: Text(message, style: const TextStyle(fontSize: 15, color: Pm.textPrimary)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('확인',
+              style: TextStyle(fontWeight: FontWeight.w700, color: Pm.primary)),
+        ),
+      ],
+    ),
   );
 }
 

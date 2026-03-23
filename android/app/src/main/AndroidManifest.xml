@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 <!--  Android 13+ 알림 권한  -->
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<!--  인앱 결제 권한  -->
+<uses-permission android:name="com.android.vending.BILLING"/>
 <application android:name="${applicationName}" android:label="페이모아" android:icon="@mipmap/ic_launcher">
 <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
 <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
@@ -10,17 +12,19 @@
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  ✅ 카카오 로그인 콜백 처리  -->
-<activity android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity" android:exported="true">
-<intent-filter>
+<!--  ✅ 카카오 로그인 콜백 처리 (Flutter SDK용 CustomTabs)  -->
+<activity android:name="com.kakao.sdk.flutter.AuthCodeCustomTabsActivity" android:exported="true">
+<intent-filter android:label="flutter_web_auth">
 <action android:name="android.intent.action.VIEW"/>
 <category android:name="android.intent.category.DEFAULT"/>
 <category android:name="android.intent.category.BROWSABLE"/>
-<data android:scheme="kakao0caeaf697a204f827b9d8525bd376311" android:host="oauth"/>
+<data android:scheme="kakao53dfe716642af3a731da9865a25e5db6" android:host="oauth"/>
 </intent-filter>
 </activity>
 <!--  Flutter 플러그인 로딩 메타데이터  -->
 <meta-data android:name="flutterEmbedding" android:value="2"/>
+<!--  AdMob App ID  -->
+<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>
 </application>
 <!--  top-level queries (Android 11+)  -->
 <queries>

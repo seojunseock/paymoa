@@ -11,6 +11,8 @@ import '../../policies/policies.dart' as pol;
 import '../../policies/policy_mapper.dart' as pm;
 import '../../payroll/payroll.dart';
 import '../../payroll/payroll_policy_mapper.dart' as ppm;
+import '../subscription_screen.dart';
+import '../../subscription/subscription_service.dart';
 
 /* ─── helpers ─────────────────────────────────── */
 String _comma(int n) {
@@ -122,9 +124,21 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
+            .showSnackBar(const SnackBar(content: Text('삭제에 실패했어요. 잠시 후 다시 시도해 주세요.')));
       }
     }
+  }
+
+  void _onAddStoreTap(List<Store> currentStores) {
+    if (kSubscriptionEnabled) {
+      // TODO: 사용자의 실제 플랜을 Firestore에서 읽어와 한도 비교
+      final planLimit = kPlans[0].maxStores; // 무료 플랜 기본값
+      if (currentStores.length >= planLimit) {
+        SubscriptionSheet.show(context);
+        return;
+      }
+    }
+    AppNav.openOwnerStoreCreate(context);
   }
 
   @override
@@ -137,67 +151,190 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F7FF),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF8F7FF),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        automaticallyImplyLeading: false,
-        centerTitle: true,
-        title: const Text(
-          '페이모아',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: 20,
-            color: Pm.textPrimary,
-          ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => AppNav.openOwnerStoreCreate(context),
-        backgroundColor: Pm.primary,
-        foregroundColor: Colors.white,
-        elevation: 4,
-        child: const Icon(Icons.add_rounded),
-      ),
-      body: StreamBuilder<List<Store>>(
-        stream: _repo.watchStores(user.uid),
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: Pm.primary),
-            );
-          }
-          if (snap.hasError) {
-            return Center(
-              child: Text('오류: ${snap.error}',
-                  style: const TextStyle(color: Pm.textSecondary)),
-            );
-          }
+    return StreamBuilder<List<Store>>(
+      stream: _repo.watchStores(user.uid),
+      builder: (ctx, snap) {
+        final stores = snap.data ?? const <Store>[];
+        final loading = snap.connectionState == ConnectionState.waiting &&
+            !snap.hasData;
 
-          final stores = snap.data ?? const <Store>[];
-          if (stores.isEmpty) {
-            return _EmptyView(
-                onAdd: () => AppNav.openOwnerStoreCreate(context));
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            itemCount: stores.length,
-            itemBuilder: (ctx, i) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: _StoreCard(
-                store: stores[i],
-                onEdit: () => AppNav.openOwnerStoreEdit(
-                    context: context, store: stores[i]),
-                onDelete: () => _confirmDelete(stores[i]),
-                onTap: () => AppNav.openOwnerStoreDetail(
-                    context: context, store: stores[i]),
+        return Scaffold(
+          backgroundColor: const Color(0xFFF8F7FF),
+          appBar: AppBar(
+            backgroundColor: const Color(0xFFF8F7FF),
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            automaticallyImplyLeading: false,
+            centerTitle: true,
+            title: const Text(
+              '페이모아',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 20,
+                color: Pm.textPrimary,
               ),
             ),
-          );
-        },
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: () => _onAddStoreTap(stores),
+            backgroundColor: Pm.primary,
+            foregroundColor: Colors.white,
+            elevation: 4,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text(
+              '매장',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          body: () {
+            if (loading) {
+              return const Center(
+                child: CircularProgressIndicator(color: Pm.primary),
+              );
+            }
+            if (snap.hasError) {
+              return const Center(
+                child: Text('데이터를 불러올 수 없어요.\n네트워크 연결을 확인해 주세요.',
+                    style: TextStyle(color: Pm.textSecondary)),
+              );
+            }
+            if (stores.isEmpty) {
+              return _EmptyView(onAdd: () => _onAddStoreTap(stores));
+            }
+
+            // ── 구독 만료 시 잠금 분기 ──────────────────────
+            final subInfo = SubscriptionService.instance.cached;
+            final isExpired =
+                subInfo?.status == SubscriptionStatus.expired;
+            final isGrace =
+                subInfo?.status == SubscriptionStatus.gracePeriod;
+            // 한도는 만료 시에만 적용 (유예기간 중·활성 중은 제한 없음)
+            final planLimit = (kSubscriptionEnabled && isExpired)
+                ? (subInfo?.plan.maxStores ?? 999)
+                : 999;
+            final normalStores =
+                stores.length <= planLimit ? stores : stores.sublist(0, planLimit);
+            final lockedStores =
+                stores.length > planLimit ? stores.sublist(planLimit) : <Store>[];
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              children: [
+                // 유예기간 배너
+                if (kSubscriptionEnabled && isGrace) ...[
+                  _SubscriptionBanner(
+                    message:
+                        '결제에 문제가 생겼어요. 유예기간 ${subInfo!.remainingGraceDays}일 남았어요.',
+                    color: const Color(0xFFFEF3C7),
+                    iconColor: const Color(0xFFF59E0B),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                // 만료 배너
+                if (kSubscriptionEnabled && isExpired) ...[
+                  _SubscriptionBanner(
+                    message: '구독이 만료됐어요. 일부 기능이 제한됩니다.',
+                    color: const Color(0xFFFEE2E2),
+                    iconColor: const Color(0xFFF43F5E),
+                    onUpgrade: () => SubscriptionSheet.show(context),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                // 정상 매장
+                ...normalStores.map((s) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: _StoreCard(
+                        store: s,
+                        isLocked: false,
+                        onEdit: () =>
+                            AppNav.openOwnerStoreEdit(context: context, store: s),
+                        onDelete: () => _confirmDelete(s),
+                        onTap: () => AppNav.openOwnerStoreDetail(
+                            context: context, store: s),
+                      ),
+                    )),
+                // 잠긴 매장
+                if (lockedStores.isNotEmpty) ...[
+                  if (normalStores.isNotEmpty) const SizedBox(height: 4),
+                  ...lockedStores.map((s) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: _StoreCard(
+                          store: s,
+                          isLocked: true,
+                          onEdit: () {},
+                          onDelete: () {},
+                          onTap: () => SubscriptionSheet.show(context),
+                        ),
+                      )),
+                ],
+              ],
+            );
+          }(),
+        );
+      },
+    );
+  }
+}
+
+/* ─── 구독 배너 ──────────────────────────────── */
+class _SubscriptionBanner extends StatelessWidget {
+  const _SubscriptionBanner({
+    required this.message,
+    required this.color,
+    required this.iconColor,
+    this.onUpgrade,
+  });
+
+  final String message;
+  final Color color;
+  final Color iconColor;
+  final VoidCallback? onUpgrade;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 18, color: iconColor),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: iconColor,
+              ),
+            ),
+          ),
+          if (onUpgrade != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onUpgrade,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: iconColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '플랜 업그레이드',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -213,12 +350,14 @@ class _StoreCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onTap,
+    this.isLocked = false,
   });
 
   final Store store;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onTap;
+  final bool isLocked;
 
   @override
   Widget build(BuildContext context) {
@@ -247,7 +386,9 @@ class _StoreCard extends StatelessWidget {
     if (payroll != null)
       rows.add(pmKv(AppWords.payroll, _labelPayroll(payroll)));
 
-    return Stack(
+    return Opacity(
+      opacity: isLocked ? 0.4 : 1.0,
+      child: Stack(
       children: [
         // ── 카드 본체 ──────────────────────────
         Container(
@@ -286,7 +427,11 @@ class _StoreCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if ((store.storeCode ?? '').trim().isNotEmpty) ...[
+                        if (isLocked) ...[
+                          const SizedBox(width: 8),
+                          const Icon(Icons.lock_rounded,
+                              size: 16, color: Color(0xFF9CA3AF)),
+                        ] else if ((store.storeCode ?? '').trim().isNotEmpty) ...[
                           const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -331,7 +476,8 @@ class _StoreCard extends StatelessWidget {
                     const SizedBox(height: 10),
                     Divider(height: 1, color: Pm.divider),
                     const SizedBox(height: 2),
-                    pmActionRow(onDelete: onDelete, onEdit: onEdit),
+                    if (!isLocked)
+                      pmActionRow(onDelete: onDelete, onEdit: onEdit),
                   ],
                 ),
               ),
@@ -356,6 +502,7 @@ class _StoreCard extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }

@@ -15,8 +15,6 @@ import 'payroll_policy.dart';
 import 'pay_calculator.dart';
 
 /// ✅ 문서(엑셀/PDF/CSV) 생성용 “한 방 입력/출력”
-///
-/// - UI/문서 금액 불일치 방지: 계산은 PayrollEngine / pay_calculator를 재사용
 class PayrollDocumentService {
   final PayrollEngine _engine;
 
@@ -64,13 +62,17 @@ class PayrollDocumentService {
         payDay: effectivePayDay,
       );
 
-      // ✅ 날짜별 시급·가산정책 이력 콜백 (카드 화면과 동일 계산 보장)
+      final historySource =
+          w.inheritFromStore ? store.policyHistory : w.policyHistory;
+
       int wageAtFn(String _, DateTime date) =>
           w.effectiveHourlyWageAt(store, date);
       SurchargePolicy surchargeAtFn(DateTime date) =>
-          w.policyHistory.surchargeAt(date) ?? surcharge;
+          historySource.surchargeAt(date) ?? surcharge;
+      TaxConfig taxAtFn(DateTime date) => historySource.taxAt(date) ?? tax;
+      InsuranceConfig insuranceAtFn(DateTime date) =>
+          historySource.insuranceAt(date) ?? insurance;
 
-      // ✅ 지급분 계산은 엔진을 그대로 사용
       final summary = _engine.summaryForDate(
         policy: policy,
         alba: alba,
@@ -80,10 +82,15 @@ class PayrollDocumentService {
         surchargePolicy: surcharge,
         wageAt: wageAtFn,
         surchargeAt: surchargeAtFn,
+        taxAt: taxAtFn,
+        insuranceAt: insuranceAtFn,
         anyDateInPeriod: period.start,
       );
 
       final workedMinutes = _sumWorkedMinutesLikeEngine(filtered);
+
+      final effectivePeriodTax = taxAtFn(summary.period.start);
+      final effectivePeriodIns = insuranceAtFn(summary.period.start);
 
       rows.add(
         PayrollDocumentRow(
@@ -95,15 +102,21 @@ class PayrollDocumentService {
           periodStart: summary.period.start,
           periodEnd: summary.period.end,
           payDate: summary.payDate,
-          hourlyWage: effectiveWage,
+          hourlyWage: wageAtFn(w.workerUid, summary.period.start),
           workedMinutes: workedMinutes,
           scheduleCount: filtered.length,
           gross: summary.gross,
           net: summary.net,
-          tax: tax,
-          insurance: insurance,
+          tax: effectivePeriodTax,
+          insurance: effectivePeriodIns,
           surcharge: surcharge,
           payrollPolicy: policy,
+          changeNotes: _buildChangeNotesForRange(
+            worker: w,
+            history: historySource,
+            rangeStart: period.start,
+            rangeEnd: period.end,
+          ),
         ),
       );
     }
@@ -119,17 +132,21 @@ class PayrollDocumentService {
     return rows;
   }
 
-  /// ✅ (2) “년도+월” 기준 문서 (캘린더 월 내역)
+  /// ✅ (2) “년도+월” 기준 문서
   ///
-  /// - month는 사용자가 선택
-  /// - 계산은 computeMonthlySummary() 재사용
-  /// - ⚠️ payDate는 "해당 월에 대한 정책상 지급일"로 계산해야 일관됨
+  /// 변경 핵심:
+  /// - 사용자가 선택한 year/month를 "근무한 달"이 아니라
+  ///   "급여일이 속한 달"로 해석
+  /// - 그 급여일에 대응하는 정산기간(period)을 찾고,
+  ///   그 기간의 스케줄만 포함
+  /// - 해당 기간에 기록이 없으면 그 알바 줄 자체를 만들지 않음
   List<PayrollDocumentRow> buildCalendarMonthDocument({
     required Store store,
     required List<StoreWorker> workers,
     required List<StoreSchedule> schedules,
     required int year,
     required int month,
+    DateTime? untilDate,
   }) {
     final Map<String, List<StoreSchedule>> byWorker = {};
     for (final s in schedules) {
@@ -138,16 +155,8 @@ class PayrollDocumentService {
 
     final rows = <PayrollDocumentRow>[];
 
-    final monthStart = DateTime(year, month, 1);
-    final monthEnd = DateTime(year, month, _daysInMonth(year, month));
-
     for (final w in workers) {
       final wsAll = byWorker[w.workerUid] ?? const <StoreSchedule>[];
-
-      // ✅ 해당 월에 속한 스케줄만
-      final ws = wsAll
-          .where((s) => s.year == year && s.month == month)
-          .toList(growable: false);
 
       final effectiveWage = _effectiveWage(store: store, worker: w);
       final effectivePayDay = _effectivePayDay(store: store, worker: w);
@@ -155,13 +164,43 @@ class PayrollDocumentService {
       final insurance = _effectiveInsurance(store: store, worker: w);
       final surcharge = _effectiveSurcharge(store: store, worker: w);
 
-      // payrollPolicy 스냅샷(문서 메타로 보관) + 지급일만 덮기
       final basePolicy = store.payrollPolicy;
       final policy = basePolicy.copyWith(
         payRule: PayDateRule.nextMonthlyDay(effectivePayDay),
       );
 
-      final uiSchedules = ws.map(_toUiSchedule).toList(growable: false);
+      // ✅ 선택한 월 안에 "급여일"이 있는 정산기간 찾기
+      final resolved = _resolveTargetPeriodForPayMonth(
+        policy: policy,
+        year: year,
+        month: month,
+      );
+      if (resolved == null) continue;
+
+      final targetPeriod = resolved.period;
+
+      // ✅ today/퇴사일 cutoff
+      DateTime? workerCutoff = untilDate == null ? null : _dateOnly(untilDate);
+      if (w.endedAt != null) {
+        final ended = _dateOnly(w.endedAt!);
+        workerCutoff = workerCutoff == null || ended.isBefore(workerCutoff)
+            ? ended
+            : workerCutoff;
+      }
+
+      var filtered = _filterSchedulesByPeriod(wsAll, targetPeriod);
+
+      if (workerCutoff != null) {
+        filtered = filtered.where((s) {
+          final d = DateTime(s.year, s.month, s.day);
+          return !d.isAfter(workerCutoff!);
+        }).toList(growable: false);
+      }
+
+      // ✅ 해당 정산기간에 기록이 없으면 "줄 자체"를 만들지 않음
+      if (filtered.isEmpty) continue;
+
+      final uiSchedules = filtered.map(_toUiSchedule).toList(growable: false);
 
       final alba = UICalendarAlba(
         id: w.workerUid,
@@ -172,30 +211,32 @@ class PayrollDocumentService {
         payDay: effectivePayDay,
       );
 
-      // ✅ 날짜별 시급·가산정책 이력 콜백 (카드 화면과 동일 계산 보장)
+      final historySource =
+          w.inheritFromStore ? store.policyHistory : w.policyHistory;
+
       int wageAtFn(String _, DateTime date) =>
           w.effectiveHourlyWageAt(store, date);
       SurchargePolicy surchargeAtFn(DateTime date) =>
-          w.policyHistory.surchargeAt(date) ?? surcharge;
+          historySource.surchargeAt(date) ?? surcharge;
+      TaxConfig taxAtFn(DateTime date) => historySource.taxAt(date) ?? tax;
+      InsuranceConfig insuranceAtFn(DateTime date) =>
+          historySource.insuranceAt(date) ?? insurance;
 
-      final monthSummary = computeMonthlySummary(
+      final summary = _engine.summaryForDate(
+        policy: policy,
         alba: alba,
-        ymYear: year,
-        ymMonth: month,
         schedules: uiSchedules,
         tax: tax,
         insurance: insurance,
-        policy: surcharge,
+        surchargePolicy: surcharge,
         wageAt: wageAtFn,
         surchargeAt: surchargeAtFn,
+        taxAt: taxAtFn,
+        insuranceAt: insuranceAtFn,
+        anyDateInPeriod: targetPeriod.start,
       );
 
-      final workedMinutes = _sumWorkedMinutesMonthly(ws);
-
-      // ✅ 중요: 월 문서의 payDate도 “정책 기반”으로 계산 (불일치 방지)
-      final preview =
-          computePreviewForDate(policy: policy, anyDateInPeriod: monthStart);
-      final payDate = preview.payDate;
+      final workedMinutes = _sumWorkedMinutesLikeEngine(filtered);
 
       rows.add(
         PayrollDocumentRow(
@@ -204,18 +245,24 @@ class PayrollDocumentService {
           storeName: store.name,
           workerUid: w.workerUid,
           workerName: (w.displayName ?? w.workerUid),
-          periodStart: monthStart,
-          periodEnd: monthEnd,
-          payDate: payDate,
-          hourlyWage: effectiveWage,
+          periodStart: summary.period.start,
+          periodEnd: summary.period.end,
+          payDate: summary.payDate,
+          hourlyWage: wageAtFn(w.workerUid, summary.period.start),
           workedMinutes: workedMinutes,
-          scheduleCount: ws.length,
-          gross: monthSummary.gross,
-          net: monthSummary.net,
-          tax: tax,
-          insurance: insurance,
+          scheduleCount: filtered.length,
+          gross: summary.gross,
+          net: summary.net,
+          tax: taxAtFn(summary.period.start),
+          insurance: insuranceAtFn(summary.period.start),
           surcharge: surcharge,
           payrollPolicy: policy,
+          changeNotes: _buildChangeNotesForRange(
+            worker: w,
+            history: historySource,
+            rangeStart: targetPeriod.start,
+            rangeEnd: targetPeriod.end,
+          ),
         ),
       );
     }
@@ -234,6 +281,49 @@ class PayrollDocumentService {
   /* ─────────────────────────────────────────
      helpers
   ────────────────────────────────────────── */
+
+  /// ✅ 선택한 급여월(year/month)에 대응하는 정산기간 찾기
+  ///
+  /// 예:
+  /// - 2/15 ~ 3/14 근무
+  /// - 3월 지급
+  /// => year=2026, month=3 선택 시 이 period를 찾아야 함
+  ({PayPeriod period, DateTime payDate})? _resolveTargetPeriodForPayMonth({
+    required PayrollPolicy policy,
+    required int year,
+    required int month,
+  }) {
+    final monthStart = DateTime(year, month, 1);
+    final monthEnd = DateTime(year, month + 1, 0);
+
+    // ✅ 전달/익월 걸침 대비 넉넉하게 탐색
+    final scanStart = monthStart.subtract(const Duration(days: 62));
+    final scanEnd = monthEnd.add(const Duration(days: 7));
+
+    final seen = <String>{};
+
+    for (DateTime d = scanStart;
+        !d.isAfter(scanEnd);
+        d = d.add(const Duration(days: 1))) {
+      final preview = computePreviewForDate(
+        policy: policy,
+        anyDateInPeriod: d,
+      );
+
+      final key =
+          '${preview.period.start.year}-${preview.period.start.month}-${preview.period.start.day}'
+          '_${preview.period.end.year}-${preview.period.end.month}-${preview.period.end.day}'
+          '_${preview.payDate.year}-${preview.payDate.month}-${preview.payDate.day}';
+
+      if (!seen.add(key)) continue;
+
+      if (preview.payDate.year == year && preview.payDate.month == month) {
+        return (period: preview.period, payDate: preview.payDate);
+      }
+    }
+
+    return null;
+  }
 
   List<StoreSchedule> _filterSchedulesByPeriod(
     List<StoreSchedule> src,
@@ -320,7 +410,7 @@ class PayrollDocumentService {
       endMinute: s.endMinute,
       breakMinutes: s.breakMinutes,
       workType: _mapWorkType(s.workType),
-      overrideHourlyWage: s.overrideHourlyWage, // ✅ 날짜별 시급 반영
+      overrideHourlyWage: s.overrideHourlyWage,
     );
   }
 
@@ -341,7 +431,7 @@ class PayrollDocumentService {
   }
 
   /* ─────────────────────────────────────────
-     effective resolvers (OwnerStoreDetailScreen과 동일)
+     effective resolvers
   ────────────────────────────────────────── */
 
   int _effectiveWage({required Store store, required StoreWorker worker}) {
@@ -395,6 +485,297 @@ class PayrollDocumentService {
     final root = worker.policyOverride ?? const <String, dynamic>{};
     return pm.surchargePolicyFromAny(root['surcharge']);
   }
+
+  List<String> _buildChangeNotesForRange({
+    required StoreWorker worker,
+    required dynamic history,
+    required DateTime rangeStart,
+    required DateTime rangeEnd,
+  }) {
+    final out = <String>[];
+
+    final entries = _extractHistoryEntries(history);
+    if (entries.isEmpty) return out;
+
+    final start = _dateOnly(rangeStart);
+    final end = _dateOnly(rangeEnd);
+
+    Map<String, dynamic>? prevRaw;
+    for (final e in entries) {
+      final effective = _extractEffectiveFrom(e);
+      final raw = _extractRawPolicy(e);
+      if (effective == null || raw == null) continue;
+
+      if (effective.isBefore(start) || effective.isAfter(end)) {
+        prevRaw = raw;
+        continue;
+      }
+
+      final line = _buildSingleChangeLine(
+        workerName: worker.displayName ?? worker.workerUid,
+        effectiveFrom: effective,
+        previous: prevRaw,
+        current: raw,
+      );
+
+      if (line != null && line.trim().isNotEmpty) {
+        out.add(line);
+      }
+
+      prevRaw = raw;
+    }
+
+    return out;
+  }
+
+  List<dynamic> _extractHistoryEntries(dynamic history) {
+    if (history == null) return const [];
+
+    final dynamic entries = history.entries;
+    if (entries is List) return entries;
+
+    if (history is List) return history;
+
+    return const [];
+  }
+
+  DateTime? _extractEffectiveFrom(dynamic entry) {
+    final raw = _extractRawPolicy(entry)?['effectiveFrom'];
+    if (raw is String) {
+      final p = raw.split('-');
+      if (p.length < 3) return null;
+      final y = int.tryParse(p[0]);
+      final m = int.tryParse(p[1]);
+      final d = int.tryParse(p[2]);
+      if (y == null || m == null || d == null) return null;
+      return DateTime(y, m, d);
+    }
+    if (raw is int) {
+      final y = raw ~/ 10000;
+      final m = (raw % 10000) ~/ 100;
+      final d = raw % 100;
+      if (y <= 0 || m <= 0 || d <= 0) return null;
+      return DateTime(y, m, d);
+    }
+    if (raw is num) {
+      final v = raw.toInt();
+      final y = v ~/ 10000;
+      final m = (v % 10000) ~/ 100;
+      final d = v % 100;
+      if (y <= 0 || m <= 0 || d <= 0) return null;
+      return DateTime(y, m, d);
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _extractRawPolicy(dynamic entry) {
+    final raw = entry?.rawPolicy;
+    if (raw is Map) return raw.cast<String, dynamic>();
+    if (entry is Map) return entry.cast<String, dynamic>();
+    return null;
+  }
+
+  String? _buildSingleChangeLine({
+    required String workerName,
+    required DateTime effectiveFrom,
+    required Map<String, dynamic>? previous,
+    required Map<String, dynamic> current,
+  }) {
+    final changes = <String>[];
+
+    _appendWageChange(changes, previous, current);
+    _appendWeeklyHolidayChange(changes, previous, current);
+    _appendOvertimeChange(changes, previous, current);
+    _appendNightChange(changes, previous, current);
+    _appendHolidayChange(changes, previous, current);
+    _appendTaxChange(changes, previous, current);
+    _appendInsuranceChange(changes, previous, current);
+
+    if (changes.isEmpty) return null;
+    return '$workerName ${PayrollDocumentRow.fmtDate(effectiveFrom)} ${changes.join(', ')}';
+  }
+
+  void _appendWageChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevWage =
+        _toInt(curr['previousHourlyWage']) ?? _toInt(prev?['hourlyWage']);
+    final currWage = _toInt(curr['hourlyWage']);
+    if (currWage == null) return;
+
+    if (prevWage == null) {
+      out.add('시급 ${_fmtWon(currWage)} 적용');
+      return;
+    }
+    if (prevWage != currWage) {
+      out.add('시급 ${_fmtWon(prevWage)}→${_fmtWon(currWage)}');
+    }
+  }
+
+  void _appendWeeklyHolidayChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevPolicy =
+        pm.surchargePolicyFromPolicy(prev ?? const <String, dynamic>{});
+    final currPolicy = pm.surchargePolicyFromPolicy(curr);
+
+    if (prevPolicy.weeklyHolidayEnabled != currPolicy.weeklyHolidayEnabled) {
+      out.add('주휴 ${currPolicy.weeklyHolidayEnabled ? 'ON' : 'OFF'}');
+    }
+
+    if (currPolicy.weeklyHolidayEnabled) {
+      if (prevPolicy.weeklyHolidayUseFixedMinutes !=
+          currPolicy.weeklyHolidayUseFixedMinutes) {
+        out.add(currPolicy.weeklyHolidayUseFixedMinutes
+            ? '주휴 고정시간 적용'
+            : '주휴 평균시간 적용');
+      } else if (currPolicy.weeklyHolidayUseFixedMinutes &&
+          prevPolicy.weeklyHolidayFixedMinutes !=
+              currPolicy.weeklyHolidayFixedMinutes) {
+        out.add(
+          '주휴 ${_fmtMinutes(prevPolicy.weeklyHolidayFixedMinutes)}→${_fmtMinutes(currPolicy.weeklyHolidayFixedMinutes)}',
+        );
+      }
+    }
+  }
+
+  void _appendOvertimeChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevPolicy =
+        pm.surchargePolicyFromPolicy(prev ?? const <String, dynamic>{});
+    final currPolicy = pm.surchargePolicyFromPolicy(curr);
+
+    if (prevPolicy.overtimeEnabled != currPolicy.overtimeEnabled) {
+      out.add('연장근로 ${currPolicy.overtimeEnabled ? 'ON' : 'OFF'}');
+    }
+
+    if (currPolicy.overtimeEnabled) {
+      if (prevPolicy.overtimeRule != currPolicy.overtimeRule) {
+        out.add(
+          '연장기준 ${_overtimeRuleLabel(prevPolicy.overtimeRule)}→${_overtimeRuleLabel(currPolicy.overtimeRule)}',
+        );
+      }
+      if (prevPolicy.overtimePercent != currPolicy.overtimePercent) {
+        out.add(
+          '연장수당 ${prevPolicy.overtimePercent}%→${currPolicy.overtimePercent}%',
+        );
+      }
+    }
+  }
+
+  void _appendNightChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevPolicy =
+        pm.surchargePolicyFromPolicy(prev ?? const <String, dynamic>{});
+    final currPolicy = pm.surchargePolicyFromPolicy(curr);
+
+    if (prevPolicy.nightEnabled != currPolicy.nightEnabled) {
+      out.add('야간수당 ${currPolicy.nightEnabled ? 'ON' : 'OFF'}');
+    }
+    if (currPolicy.nightEnabled &&
+        prevPolicy.nightPercent != currPolicy.nightPercent) {
+      out.add('야간수당 ${prevPolicy.nightPercent}%→${currPolicy.nightPercent}%');
+    }
+  }
+
+  void _appendHolidayChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevPolicy =
+        pm.surchargePolicyFromPolicy(prev ?? const <String, dynamic>{});
+    final currPolicy = pm.surchargePolicyFromPolicy(curr);
+
+    if (prevPolicy.holidayEnabled != currPolicy.holidayEnabled) {
+      out.add('휴일수당 ${currPolicy.holidayEnabled ? 'ON' : 'OFF'}');
+    }
+    if (currPolicy.holidayEnabled &&
+        prevPolicy.holidayPercent != currPolicy.holidayPercent) {
+      out.add(
+          '휴일수당 ${prevPolicy.holidayPercent}%→${currPolicy.holidayPercent}%');
+    }
+  }
+
+  void _appendTaxChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevTax = pm.taxConfigFromPolicy(prev ?? const <String, dynamic>{});
+    final currTax = pm.taxConfigFromPolicy(curr);
+    final prevLabel = _taxLabel(prevTax);
+    final currLabel = _taxLabel(currTax);
+    if (prevLabel != currLabel) {
+      out.add('세금 $prevLabel→$currLabel');
+    }
+  }
+
+  void _appendInsuranceChange(
+    List<String> out,
+    Map<String, dynamic>? prev,
+    Map<String, dynamic> curr,
+  ) {
+    final prevIns =
+        pm.insuranceConfigFromPolicy(prev ?? const <String, dynamic>{});
+    final currIns = pm.insuranceConfigFromPolicy(curr);
+    final prevLabel = _insuranceLabel(prevIns);
+    final currLabel = _insuranceLabel(currIns);
+    if (prevLabel != currLabel) {
+      out.add('보험 $prevLabel→$currLabel');
+    }
+  }
+
+  int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('$v');
+  }
+
+  String _fmtWon(int v) => '${v.toString()}원';
+
+  String _fmtMinutes(int mins) {
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    if (h > 0 && m > 0) return '${h}시간 ${m}분';
+    if (h > 0) return '${h}시간';
+    return '${m}분';
+  }
+
+  String _overtimeRuleLabel(OvertimeRule rule) {
+    switch (rule) {
+      case OvertimeRule.dailyOver8:
+        return '일 8시간 초과';
+      case OvertimeRule.weeklyOver40:
+        return '주 40시간 초과';
+    }
+  }
+
+  String _taxLabel(TaxConfig tax) {
+    if (tax == TaxConfig.none) return '없음';
+    if (tax == TaxConfig.biz33) return '3.3%';
+    if (tax == TaxConfig.day66) return '6.6%';
+    if (tax is TaxConfigCustomPercent) return '${tax.percent}%';
+    return '직접입력';
+  }
+
+  String _insuranceLabel(InsuranceConfig ins) {
+    if (ins is InsuranceNone) return '없음';
+    if (ins is InsuranceEmploymentOnly) return '고용보험';
+    if (ins is InsuranceFour) return '4대보험';
+    return '직접입력';
+  }
 }
 
 enum PayrollDocumentKind {
@@ -427,6 +808,7 @@ class PayrollDocumentRow {
   final InsuranceConfig insurance;
   final SurchargePolicy surcharge;
   final PayrollPolicy payrollPolicy;
+  final List<String> changeNotes;
 
   const PayrollDocumentRow({
     required this.kind,
@@ -446,6 +828,7 @@ class PayrollDocumentRow {
     required this.insurance,
     required this.surcharge,
     required this.payrollPolicy,
+    this.changeNotes = const [],
   });
 
   int get workedHoursFloor => workedMinutes ~/ 60;
@@ -471,6 +854,7 @@ class PayrollDocumentRow {
       'workedTime': workedTimeText,
       'gross': gross,
       'net': net,
+      'changeNotes': changeNotes,
     };
   }
 }

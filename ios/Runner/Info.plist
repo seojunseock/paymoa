@@ -51,6 +51,10 @@
 	<!-- 알림: 로컬 알림은 별도 UsageDescription 키가 필요하지 않습니다.
 	     권한 요청은 런타임(DarwinInitializationSettings)에서 수행됩니다. -->
 
+	<!-- AdMob App ID -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~3347511713</string>
+
 	<!-- ✅ 카카오 앱 키 -->
 	<key>KAKAO_APP_KEY</key>
 	<string>0caeaf697a204f827b9d8525bd376311</string>

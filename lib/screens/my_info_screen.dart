@@ -7,14 +7,31 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
-import '../payroll/pay_calculator.dart';
+import 'subscription_screen.dart';
+
+class MyInfoMonthlyNetPoint {
+  final int year;
+  final int month;
+  final int net;
+
+  const MyInfoMonthlyNetPoint({
+    required this.year,
+    required this.month,
+    required this.net,
+  });
+}
 
 class _MonthPoint {
   final int year;
   final int month;
   final int net;
-  const _MonthPoint(
-      {required this.year, required this.month, required this.net});
+
+  const _MonthPoint({
+    required this.year,
+    required this.month,
+    required this.net,
+  });
+
   String get label => '${month}월';
 }
 
@@ -35,8 +52,10 @@ class MyInfoScreen extends StatefulWidget {
     this.onOpenTerms,
     this.onOpenPrivacy,
     this.onOpenSupport,
+    this.monthlyNetPoints = const [],
   });
 
+  // ✅ 기존 호출부와의 호환을 위해 유지
   final List<UICalendarAlba> albas;
   final List<UICalendarSchedule> schedules;
   final int Function(String albaId, DateTime dateLocal) wageAt;
@@ -47,6 +66,10 @@ class MyInfoScreen extends StatefulWidget {
       surchargeAt;
   final int? userAge;
   final int payDay;
+
+  // ✅ 실제 그래프는 이 값만 사용
+  final List<MyInfoMonthlyNetPoint> monthlyNetPoints;
+
   final VoidCallback? onLogout;
   final VoidCallback? onDeleteAccount;
   final VoidCallback? onOpenTerms;
@@ -64,59 +87,61 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
   @override
   void initState() {
     super.initState();
-    _computePoints();
+    _syncPoints();
   }
 
   @override
   void didUpdateWidget(covariant MyInfoScreen old) {
     super.didUpdateWidget(old);
-    if (old.albas.length != widget.albas.length ||
-        old.schedules.length != widget.schedules.length) {
-      _computePoints();
+    if (!_sameMonthlyPoints(old.monthlyNetPoints, widget.monthlyNetPoints)) {
+      _syncPoints();
     }
   }
 
-  // ─── 최근 3개월 실수령 계산 ──────────────────
-  void _computePoints() {
-    final now = DateTime.now();
-    final points = <_MonthPoint>[];
+  void _syncPoints() {
+    final sorted = [...widget.monthlyNetPoints]..sort((a, b) {
+        final ak = a.year * 100 + a.month;
+        final bk = b.year * 100 + b.month;
+        return ak.compareTo(bk);
+      });
 
-    for (int offset = 2; offset >= 0; offset--) {
-      final dt = DateTime(now.year, now.month - offset, 1);
-      final y = dt.year;
-      final m = dt.month;
-      int monthNet = 0;
+    final latest3 = sorted.length <= 3
+        ? sorted
+        : sorted.sublist(sorted.length - 3, sorted.length);
 
-      for (final alba in widget.albas) {
-        final tax = widget.taxOf(alba.id) ?? TaxConfig.none;
-        final ins = widget.insuranceOf(alba.id) ?? const InsuranceNone();
-        final pol = widget.policyOf(alba.id) ?? const SurchargePolicy();
+    final points = latest3
+        .map((e) => _MonthPoint(year: e.year, month: e.month, net: e.net))
+        .toList(growable: false);
 
-        // ✅ 해당 알바의 스케줄만 필터링 (전체 전달하면 알바 수만큼 중복 계산됨)
-        final albaSchedules =
-            widget.schedules.where((s) => s.albaId == alba.id).toList();
+    if (!mounted) {
+      _points = points;
+      return;
+    }
 
-        final surchargeAtFn = widget.surchargeAt?.call(alba.id);
-        final summary = computeMonthlySummary(
-          alba: alba,
-          ymYear: y,
-          ymMonth: m,
-          schedules: albaSchedules,
-          tax: tax,
-          insurance: ins,
-          policy: pol,
-          surchargeAt: surchargeAtFn,
-          wageAt: widget.wageAt,
-        );
-        monthNet += summary.net;
+    setState(() {
+      _points = points;
+      if (_touchedIndex >= _points.length) {
+        _touchedIndex = -1;
       }
-      points.add(_MonthPoint(year: y, month: m, net: monthNet));
-    }
-
-    if (mounted) setState(() => _points = points);
+    });
   }
 
-  // ─── helpers ─────────────────────────────────
+  bool _sameMonthlyPoints(
+    List<MyInfoMonthlyNetPoint> a,
+    List<MyInfoMonthlyNetPoint> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].year != b[i].year ||
+          a[i].month != b[i].month ||
+          a[i].net != b[i].net) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Future<void> _safeLogout() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -129,9 +154,13 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(AppWords.logout,
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+            child: const Text(
+              AppWords.logout,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF111827),
+              ),
+            ),
           ),
         ],
       ),
@@ -151,7 +180,8 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${AppWords.logoutFailed}\n$e')));
+        const SnackBar(content: Text('로그아웃에 실패했어요. 잠시 후 다시 시도해 주세요.')),
+      );
     }
   }
 
@@ -180,7 +210,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     return b.toString();
   }
 
-  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -194,9 +223,10 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
         title: const Text(
           '내 정보',
           style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 20,
-              color: Color(0xFF111827)),
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+            color: Color(0xFF111827),
+          ),
         ),
       ),
       body: ListView(
@@ -214,7 +244,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     );
   }
 
-  // ─── ① 3개월 실수령 꺾은선 카드 ─────────────
   Widget _buildIncomeCard() {
     final theme = Theme.of(context);
     final hasData = _points.any((p) => p.net > 0);
@@ -235,7 +264,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 헤더
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -245,20 +273,29 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                   color: const Color(0xFF7C3AED).withOpacity(0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.trending_up_rounded,
-                    color: Color(0xFF7C3AED), size: 22),
+                child: const Icon(
+                  Icons.trending_up_rounded,
+                  color: Color(0xFF7C3AED),
+                  size: 22,
+                ),
               ),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('3개월 실수령',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFF111827))),
-                  Text('세금·보험 공제 후',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: const Color(0xFF9CA3AF))),
+                  Text(
+                    '3개월 실수령',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF111827),
+                    ),
+                  ),
+                  Text(
+                    '앞 화면에서 계산된 최종 금액',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF9CA3AF),
+                    ),
+                  ),
                 ],
               ),
               const Spacer(),
@@ -266,48 +303,52 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('이번 달',
-                        style: theme.textTheme.labelSmall
-                            ?.copyWith(color: const Color(0xFF9CA3AF))),
+                    Text(
+                      '이번 달',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF9CA3AF),
+                      ),
+                    ),
                     Text(
                       _won(_points.last.net),
                       style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: const Color(0xFF7C3AED)),
+                        fontWeight: FontWeight.w900,
+                        color: const Color(0xFF7C3AED),
+                      ),
                     ),
                   ],
                 ),
             ],
           ),
-
           const SizedBox(height: 24),
-
-          // 그래프
           if (!hasData)
             SizedBox(
               height: 140,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.show_chart_rounded,
-                      size: 36,
-                      color: const Color(0xFF9CA3AF).withOpacity(0.4)),
+                  Icon(
+                    Icons.show_chart_rounded,
+                    size: 36,
+                    color: const Color(0xFF9CA3AF).withOpacity(0.4),
+                  ),
                   const SizedBox(height: 8),
-                  Text('아직 기록된 근무가 없어요',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: const Color(0xFF9CA3AF))),
+                  Text(
+                    '아직 표시할 급여가 없어요',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF9CA3AF),
+                    ),
+                  ),
                 ],
               ),
             )
           else
             SizedBox(height: 180, child: _buildLineChart(theme)),
-
-          // X축 월 레이블
           if (hasData) ...[
             const SizedBox(height: 10),
             Row(
               children: [
-                const SizedBox(width: 44), // leftTitles reserved size
+                const SizedBox(width: 44),
                 Expanded(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -345,14 +386,16 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
         .asMap()
         .entries
         .map((e) => FlSpot(e.key.toDouble(), e.value.net.toDouble()))
-        .toList();
+        .toList(growable: false);
+
+    final maxX = (_points.length - 1).toDouble();
 
     return LineChart(
       LineChartData(
         minY: 0,
         maxY: safeMax,
         minX: 0,
-        maxX: 2,
+        maxX: maxX < 0 ? 0 : maxX,
         clipData: const FlClipData.all(),
         gridData: FlGridData(
           show: true,
@@ -378,8 +421,9 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
                   padding: const EdgeInsets.only(right: 6),
                   child: Text(
                     _wonAxis(val.round()),
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: const Color(0xFF9CA3AF)),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: const Color(0xFF9CA3AF),
+                    ),
                     textAlign: TextAlign.right,
                   ),
                 );
@@ -412,9 +456,7 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
             getTooltipItems: (touchedSpots) {
               return touchedSpots.map((s) {
                 final idx = s.spotIndex;
-                if (idx < 0 || idx >= _points.length) {
-                  return null;
-                }
+                if (idx < 0 || idx >= _points.length) return null;
                 final p = _points[idx];
                 return LineTooltipItem(
                   '${p.label}\n${_won(p.net)}',
@@ -475,39 +517,46 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     );
   }
 
-  // ─── ② 약관 카드 ─────────────────────────────
+  void _openSubscription() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const SubscriptionScreen(),
+      ),
+    );
+  }
+
   Widget _buildPolicyCard() {
     return _InfoCard(children: [
       _InfoTile(
-          icon: Icons.description_outlined,
-          label: AppWords.terms,
-          onTap: widget.onOpenTerms),
+        icon: Icons.workspace_premium_rounded,
+        label: '구독 플랜',
+        onTap: _openSubscription,
+      ),
       const Divider(height: 1, indent: 52),
       _InfoTile(
-          icon: Icons.privacy_tip_outlined,
-          label: AppWords.privacy,
-          onTap: widget.onOpenPrivacy),
+        icon: Icons.description_outlined,
+        label: AppWords.terms,
+        onTap: widget.onOpenTerms,
+      ),
       const Divider(height: 1, indent: 52),
       _InfoTile(
-        icon: Icons.receipt_long_outlined,
-        label: AppWords.openSourceLicense,
-        onTap: () => showLicensePage(
-            context: context, applicationName: AppWords.appName),
+        icon: Icons.privacy_tip_outlined,
+        label: AppWords.privacy,
+        onTap: widget.onOpenPrivacy,
       ),
     ]);
   }
 
-  // ─── ③ 문의하기 카드 ──────────────────────────
   Widget _buildFaqSupportCard() {
     return _InfoCard(children: [
       _InfoTile(
-          icon: Icons.support_agent_outlined,
-          label: AppWords.support,
-          onTap: widget.onOpenSupport),
+        icon: Icons.support_agent_outlined,
+        label: AppWords.support,
+        onTap: widget.onOpenSupport,
+      ),
     ]);
   }
 
-  // ─── ④ 위험 구역 카드 ────────────────────────
   Widget _buildDangerZoneCard() {
     return Container(
       decoration: BoxDecoration(
@@ -522,32 +571,32 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
           ),
         ],
       ),
-      child: Column(children: [
-        _InfoTile(
-          icon: Icons.logout_rounded,
-          label: AppWords.logout,
-          iconColor: const Color(0xFFF43F5E),
-          labelColor: const Color(0xFFF43F5E),
-          onTap: _safeLogout,
-        ),
-        const Divider(height: 1, indent: 52),
-        _InfoTile(
-          icon: Icons.delete_forever_rounded,
-          label: AppWords.deleteAccount,
-          iconColor: const Color(0xFFF43F5E),
-          labelColor: const Color(0xFFF43F5E),
-          onTap: widget.onDeleteAccount,
-        ),
-      ]),
+      child: Column(
+        children: [
+          _InfoTile(
+            icon: Icons.logout_rounded,
+            label: AppWords.logout,
+            iconColor: const Color(0xFFF43F5E),
+            labelColor: const Color(0xFFF43F5E),
+            onTap: _safeLogout,
+          ),
+          const Divider(height: 1, indent: 52),
+          _InfoTile(
+            icon: Icons.delete_forever_rounded,
+            label: AppWords.deleteAccount,
+            iconColor: const Color(0xFFF43F5E),
+            labelColor: const Color(0xFFF43F5E),
+            onTap: widget.onDeleteAccount,
+          ),
+        ],
+      ),
     );
   }
 }
 
-// ─────────────────────────────────────────────
-// 공용 위젯
-// ─────────────────────────────────────────────
 class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.children});
+
   final List<Widget> children;
 
   @override
@@ -558,9 +607,10 @@ class _InfoCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(children: children),
@@ -599,12 +649,19 @@ class _InfoTile extends StatelessWidget {
             Icon(icon, size: 20, color: ic),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(label,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600, color: lc)),
+              child: Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: lc,
+                ),
+              ),
             ),
-            Icon(Icons.chevron_right_rounded,
-                size: 20, color: ic.withOpacity(0.4)),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: ic.withOpacity(0.4),
+            ),
           ],
         ),
       ),

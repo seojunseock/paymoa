@@ -1,5 +1,4 @@
 // lib/screens/work_editor_screen.dart
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../common/app_words.dart';
@@ -10,6 +9,7 @@ import '../policies/policies.dart' as pol;
 import '../policies/policy_sheet.dart';
 import 'date_assign_sheet.dart';
 import 'work_editor_args.dart' as wargs;
+import '../ads/ad_service.dart';
 
 /* ───────────────── 바텀시트 열기 ───────────────── */
 
@@ -24,7 +24,6 @@ Future<void> showWorkEditorSheet({
   pol.SurchargePolicy? Function(String albaId)? getSurchargePolicy,
   Future<void> Function(String albaId, PolicySheetResult result)?
       onUpdatePolicy,
-  // ✅ 날짜 기반 시급 조회 (policyHistory 기준)
   int Function(String albaId, DateTime date)? wageAt,
 }) async {
   await showModalBottomSheet<void>(
@@ -77,7 +76,6 @@ class _WorkEditorSheet extends StatefulWidget {
   final Future<void> Function(String albaId, PolicySheetResult result)?
       onUpdatePolicy;
 
-  // ✅ 날짜 기반 시급 (policyHistory 기준)
   final int Function(String albaId, DateTime date)? wageAt;
 
   @override
@@ -93,25 +91,25 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
   int _breakMin = 0;
 
   String? _editingScheduleId;
+  String? _editingDocPath;
+  DateTime? _originalDate;
 
   bool _saving = false;
   _WorkType _workType = _WorkType.basic;
-  int? _overrideWage; // null이면 기본 시급 사용
+  int? _overrideWage;
 
-  // ✅ 매장 알바인지 확인
+  bool get _hasAlbas => widget.albas.isNotEmpty;
+
   bool get _isStoreAlba {
-    final alba = widget.albas.firstWhere(
-      (a) => a.id == _selectedAlbaId,
-      orElse: () => widget.albas.isNotEmpty
-          ? widget.albas.first
-          : const UICalendarAlba(
-              id: '', name: '', colorHex: '#3B82F6', hourlyWage: 0, payDay: 25),
-    );
+    final alba = _alba;
     return alba.storeId.isNotEmpty;
   }
 
-  String get _selectedAlbaId =>
-      _albaId.isEmpty ? widget.albas.first.id : _albaId;
+  String get _selectedAlbaId {
+    if (_albaId.isNotEmpty) return _albaId;
+    if (widget.albas.isNotEmpty) return widget.albas.first.id;
+    return '';
+  }
 
   @override
   void initState() {
@@ -147,6 +145,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
 
       if (s.id.isNotEmpty) {
         _editingScheduleId = s.id;
+        _editingDocPath = s.docPath;
         _albaId = s.albaId;
         _startH = s.startHour;
         _startM = s.startMinute;
@@ -154,15 +153,15 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
         _endM = s.endMinute;
         _breakMin = s.breakMinutes;
         _selectedUtcDates = {DateTime.utc(s.year, s.month, s.day)};
+        _originalDate = DateTime(s.year, s.month, s.day);
         _workType = _mapBackToWorkType(s.workType);
-        // ✅ 기존 overrideHourlyWage 로드 (기준일 전후 시급 표시 정확성)
         _overrideWage = s.overrideHourlyWage;
       }
     }
   }
 
   UICalendarAlba get _alba => widget.albas.firstWhere(
-        (a) => a.id == _albaId,
+        (a) => a.id == _selectedAlbaId,
         orElse: () => const UICalendarAlba(
           id: '',
           name: '',
@@ -176,19 +175,8 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
 
   String _fmtAm(int h, int m) => cp.fmtAmPm(h, m);
 
-  // MM.DD 형식 (년도 제거)
   String _ymd(DateTime d) =>
       '${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
-
-  String _formatWage(int w) {
-    final s = w.toString();
-    final buf = StringBuffer();
-    for (var i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
-      buf.write(s[i]);
-    }
-    return buf.toString();
-  }
 
   pol.SurchargePolicy? _currentSurcharge() =>
       widget.getSurchargePolicy?.call(_albaId);
@@ -198,12 +186,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     final crosses =
         ((_endH * 60 + _endM) <= (_startH * 60 + _startM)) ? true : false;
     return crosses ? '$base ${AppWords.nextDaySuffix}' : base;
-  }
-
-  String get _datesText {
-    if (_selectedUtcDates.isEmpty) return AppWords.none;
-    if (_selectedUtcDates.length == 1) return _ymd(_selectedUtcDates.first);
-    return '${_selectedUtcDates.length}${AppWords.dayUnit}';
   }
 
   String get _breakText => '${_breakMin}${AppWords.minuteUnit}';
@@ -223,7 +205,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     }
   }
 
-  /// AppBar 타이틀: 날짜 지정 시 "2월 15일 근무 추가", 아니면 기본 타이틀
   String get _appBarTitle {
     if (_isEdit) return AppWords.workEditTitle;
     final preset = widget.args.presetDate;
@@ -243,7 +224,8 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       endHour24: _endH,
       endMinute: _endM,
     );
-    if (result == null || !mounted) return;
+    if (!mounted || result == null) return;
+
     setState(() {
       _startH = result.startHour24;
       _startM = result.startMinute;
@@ -256,7 +238,10 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     await cp.showBreakSheet(
       context: context,
       initialMinutes: _breakMin,
-      onDone: (m) => setState(() => _breakMin = m),
+      onDone: (m) {
+        if (!mounted) return;
+        setState(() => _breakMin = m);
+      },
     );
   }
 
@@ -267,9 +252,9 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       checkConflict: (utc) =>
           _hasAnyConflictOn(DateTime(utc.year, utc.month, utc.day)),
     );
-    if (res != null) {
-      setState(() => _selectedUtcDates = res.selectedDates.toSet());
-    }
+    if (!mounted || res == null) return;
+
+    setState(() => _selectedUtcDates = res.selectedDates.toSet());
   }
 
   /* ───────────────── Conflict Check ───────────────── */
@@ -335,32 +320,47 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(AppWords.delete,
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
+            child: const Text(
+              AppWords.delete,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFF43F5E),
+              ),
+            ),
           ),
         ],
       ),
     );
-
+    if (!mounted) return;
     if (ok != true) return;
 
     setState(() => _saving = true);
     try {
       await widget.onDelete(_editingScheduleId!);
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.deleteFailed}\n$e')),
-      );
+      showErrorDialog(context, '삭제에 실패했어요.\n잠시 후 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
+  void _saveTapped() {
+    AdService.instance.showRewardedAd(
+      onRewarded: _save,
+      onNotReady: _save,
+    );
+  }
+
   Future<void> _save() async {
     if (_saving) return;
+
+    if (!_hasAlbas) {
+      _showSnack('등록된 알바가 없어요.');
+      return;
+    }
 
     if (_albaId.isEmpty) {
       _showSnack(AppWords.workPickAlbaWarn);
@@ -389,6 +389,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
           ],
         ),
       );
+      if (!mounted) return;
       return;
     }
 
@@ -396,6 +397,13 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     try {
       if (_isEdit && _editingScheduleId != null) {
         final d = _selectedUtcDates.first;
+        final newDate = DateTime(d.year, d.month, d.day);
+
+        int? resolvedWage = _overrideWage;
+        if (_originalDate != null && newDate != _originalDate) {
+          resolvedWage = widget.wageAt?.call(_albaId, newDate);
+        }
+
         await widget.onUpdate(
           UICalendarSchedule(
             id: _editingScheduleId!,
@@ -409,15 +417,15 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
             endMinute: _endM,
             breakMinutes: _breakMin,
             workType: _mapWorkType(_workType),
-            overrideHourlyWage: _overrideWage,
+            overrideHourlyWage: resolvedWage,
+            docPath: _editingDocPath,
           ),
         );
       } else {
         for (final d in _selectedUtcDates) {
-          // ✅ 날짜 기반 시급 자동 계산 (policyHistory 기준)
-          // 기준일 이전 근무 → 이전 시급, 기준일 이후 → 새 시급
-          final dateLocal = DateTime(d.year, d.month, d.day);
-          final computedWage = widget.wageAt?.call(_albaId, dateLocal);
+          final localDate = DateTime(d.year, d.month, d.day);
+          final resolvedWage = widget.wageAt?.call(_albaId, localDate);
+
           await widget.onAdd(
             UICalendarSchedule(
               id: '',
@@ -431,25 +439,24 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
               endMinute: _endM,
               breakMinutes: _breakMin,
               workType: _mapWorkType(_workType),
-              // wageAt이 있으면 날짜 기반 시급, 없으면 null (기본 시급 사용)
-              overrideHourlyWage: computedWage,
+              overrideHourlyWage: resolvedWage,
             ),
           );
         }
       }
 
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.saveFailed}\n$e')),
-      );
+      showErrorDialog(context, '저장에 실패했어요.\n잠시 후 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   void _showSnack(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
     );
@@ -461,7 +468,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // 선택 날짜 미리보기 (멀티)
     final sortedDates = _selectedUtcDates.toList()
       ..sort((a, b) => a.compareTo(b));
 
@@ -477,7 +483,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
               scrolledUnderElevation: 0,
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-                onPressed: () => Navigator.pop(context),
+                onPressed: _saving ? null : () => Navigator.pop(context),
               ),
               title: Text(_appBarTitle),
               centerTitle: true,
@@ -486,7 +492,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                   IconButton(
                     tooltip: AppWords.delete,
                     icon: const Icon(Icons.delete_outline),
-                    onPressed: _deleteIfEdit,
+                    onPressed: _saving ? null : _deleteIfEdit,
                   ),
               ],
             ),
@@ -499,7 +505,6 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
                       children: [
-                        // ✅ “수정 섹션” (탭 가능한 Row)
                         _TossCard(
                           padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                           child: Column(
@@ -510,23 +515,26 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                     ? AppWords.none
                                     : _alba.name,
                                 leading: _ColorDot(color: _albaColor),
-                                onTap: () async {
-                                  await showModalBottomSheet<void>(
-                                    context: context,
-                                    useSafeArea: true,
-                                    showDragHandle: true,
-                                    builder: (ctx) {
-                                      return _AlbaPickerSheet(
-                                        albas: widget.albas,
-                                        selectedId: _albaId,
-                                        onPick: (id) {
-                                          setState(() => _albaId = id);
-                                          Navigator.pop(ctx);
-                                        },
-                                      );
-                                    },
-                                  );
-                                },
+                                onTap: !_hasAlbas
+                                    ? () => _showSnack('등록된 알바가 없어요.')
+                                    : () async {
+                                        final picked =
+                                            await showModalBottomSheet<String>(
+                                          context: context,
+                                          useSafeArea: true,
+                                          showDragHandle: true,
+                                          builder: (ctx) {
+                                            return _AlbaPickerSheet(
+                                              albas: widget.albas,
+                                              selectedId: _albaId,
+                                              onPick: (id) =>
+                                                  Navigator.pop(ctx, id),
+                                            );
+                                          },
+                                        );
+                                        if (!mounted || picked == null) return;
+                                        setState(() => _albaId = picked);
+                                      },
                               ),
                               const Divider(height: 1),
                               _TapRow(
@@ -539,14 +547,13 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                     context: context,
                                     useSafeArea: true,
                                     showDragHandle: true,
-                                    // ✅ 정책 설정된 타입만 표시
                                     builder: (ctx) => _WorkTypeSheet(
                                       current: _workType,
                                       albaColor: _albaColor,
                                       surcharge: _currentSurcharge(),
                                     ),
                                   );
-                                  if (picked == null) return;
+                                  if (!mounted || picked == null) return;
                                   setState(() => _workType = picked);
                                 },
                               ),
@@ -581,14 +588,12 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                 leadingIcon: Icons.coffee_rounded,
                                 onTap: _pickBreak,
                               ),
-                            ], // Column children
-                          ), // Column
-                        ), // _TossCard
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
-
-                  // ✅ 하단 큰 저장 버튼 (토스식)
                   SafeArea(
                     top: false,
                     child: Padding(
@@ -597,7 +602,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                         width: double.infinity,
                         height: 52,
                         child: FilledButton(
-                          onPressed: _save,
+                          onPressed: _saving ? null : _saveTapped,
                           style: FilledButton.styleFrom(
                             backgroundColor: Pm.primary,
                             shape: RoundedRectangleBorder(
@@ -605,7 +610,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                             ),
                           ),
                           child: Text(
-                            _isEdit ? AppWords.save : AppWords.save,
+                            AppWords.save,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                               color: theme.colorScheme.onPrimary,
@@ -709,89 +714,6 @@ class _ColorDot extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: theme.colorScheme.outline.withOpacity(0.25)),
       ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.text, required this.bg, required this.fg});
-  final String text;
-  final Color bg;
-  final Color fg;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: fg,
-            ),
-      ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.icon,
-    required this.title,
-    required this.value,
-    this.sub,
-  });
-
-  final IconData icon;
-  final String title;
-  final String value;
-  final String? sub;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon,
-            size: 18, color: theme.colorScheme.onSurface.withOpacity(0.6)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: theme.colorScheme.onSurface.withOpacity(0.65),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              if (sub != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  sub!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.65),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
@@ -907,30 +829,6 @@ class _MiniChip extends StatelessWidget {
   }
 }
 
-class _PickerBlock extends StatelessWidget {
-  const _PickerBlock({required this.title, required this.child});
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(
-          title,
-          style:
-              theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 8),
-        Expanded(child: child),
-      ],
-    );
-  }
-}
-
-/* ───────────────── 알바 선택 시트 ───────────────── */
-
 class _AlbaPickerSheet extends StatelessWidget {
   const _AlbaPickerSheet({
     required this.albas,
@@ -995,8 +893,6 @@ class _AlbaPickerSheet extends StatelessWidget {
   }
 }
 
-/* ───────────────── 근무 타입 선택 시트 ───────────────── */
-
 class _WorkTypeSheet extends StatelessWidget {
   const _WorkTypeSheet({
     required this.current,
@@ -1006,7 +902,6 @@ class _WorkTypeSheet extends StatelessWidget {
 
   final _WorkType current;
   final Color albaColor;
-  // ✅ 정책 기반 필터링: null이면 기본+대타만 표시
   final pol.SurchargePolicy? surcharge;
 
   @override
@@ -1017,9 +912,10 @@ class _WorkTypeSheet extends StatelessWidget {
     Widget tile(_WorkType t, String label, IconData icon) {
       final on = t == current;
       return ListTile(
-        leading: Icon(icon,
-            color:
-                on ? albaColor : theme.colorScheme.onSurface.withOpacity(0.65)),
+        leading: Icon(
+          icon,
+          color: on ? albaColor : theme.colorScheme.onSurface.withOpacity(0.65),
+        ),
         title: Text(
           label,
           style: theme.textTheme.bodyLarge?.copyWith(
@@ -1049,11 +945,12 @@ class _WorkTypeSheet extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          // ✅ 기본 + 대타는 항상 표시
           tile(_WorkType.basic, AppWords.workTypeBasic, Icons.work_rounded),
-          tile(_WorkType.substitute, AppWords.workTypeSubstitute,
-              Icons.swap_horiz_rounded),
-          // ✅ 야간/연장/휴일: 해당 정책이 활성화된 경우만 표시
+          tile(
+            _WorkType.substitute,
+            AppWords.workTypeSubstitute,
+            Icons.swap_horiz_rounded,
+          ),
           if (sur != null && sur.nightEnabled)
             tile(_WorkType.night, AppWords.workTypeNight,
                 Icons.nightlight_round),
@@ -1069,8 +966,6 @@ class _WorkTypeSheet extends StatelessWidget {
     );
   }
 }
-
-/* ───────────────────────── 시급 옵션 타일 (공용) ───────────────────────── */
 
 class _WageOptionTile extends StatelessWidget {
   const _WageOptionTile({

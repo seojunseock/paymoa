@@ -128,6 +128,8 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
         _weeklyHolidayOn || _dailyOverOn || _weeklyOverOn || _holOn || _nightOn;
     if (!anyOn) return null;
 
+    final base = widget.initialSurcharge ?? const pol.SurchargePolicy();
+
     // 연장수당: 일 8시간 / 주 40시간 중 하나만 선택 (마지막 켠 쪽 우선)
     // 둘 다 켜져 있으면 둘 다 처리 - 별도 필드로 저장
     final overEnabled = _dailyOverOn || _weeklyOverOn;
@@ -141,11 +143,16 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
 
     return pol.SurchargePolicy(
       weeklyHolidayEnabled: _weeklyHolidayOn,
+      weeklyHolidayWeekday: base.weeklyHolidayWeekday,
+      weeklyHolidayUseFixedMinutes: base.weeklyHolidayUseFixedMinutes,
+      weeklyHolidayFixedMinutes: base.weeklyHolidayFixedMinutes,
       overtimeEnabled: overEnabled,
       overtimePercent: overEnabled ? overPct : 0,
       overtimeRule: overRule,
       holidayEnabled: _holOn,
       holidayPercent: int.tryParse(_digitsOnly(_holPctCtl.text)) ?? 50,
+      holidayUseKoreanLawTier: base.holidayUseKoreanLawTier,
+      extraHolidayYmds: base.extraHolidayYmds,
       nightEnabled: _nightOn,
       nightPercent: int.tryParse(_digitsOnly(_nightPctCtl.text)) ?? 50,
     );
@@ -153,219 +160,212 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardH = MediaQuery.of(context).viewInsets.bottom;
     return SafeArea(
-      child: Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── 헤더
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 12, 10),
-              child: Row(
-                children: [
-                  const Text('세금·보험·추가수당',
-                      style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF111827))),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('취소',
-                        style: TextStyle(color: Color(0xFF9CA3AF))),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── 헤더
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 12, 10),
+            child: Row(
+              children: [
+                const Text('세금·보험·추가수당',
+                    style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF111827))),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소',
+                      style: TextStyle(color: Color(0xFF9CA3AF))),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  onPressed: () => Navigator.pop(
+                      context,
+                      PolicySheetResult(
+                          tax: _tax, ins: _ins, surcharge: _buildSurcharge())),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size.zero,
                   ),
-                  const SizedBox(width: 4),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(
-                        context,
-                        PolicySheetResult(
-                            tax: _tax,
-                            ins: _ins,
-                            surcharge: _buildSurcharge())),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF7C3AED),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 9),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      minimumSize: Size.zero,
+                  child: const Text('완료',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: const Color(0xFFF0F0F5)),
+
+          // ── 스크롤 본문
+          Flexible(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(16, 20, 16, 32 + keyboardH),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ═══ 세금 ═══
+                  const _SectionTitle(text: '세금'),
+                  const SizedBox(height: 8),
+                  _RadioTile(
+                    label: '없음',
+                    desc: '세금 공제 없이 전액 받아요',
+                    selected: _tax == pol.TaxConfig.none && !_customTaxMode,
+                    onTap: () => setState(() {
+                      _tax = pol.TaxConfig.none;
+                      _customTaxMode = false;
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                  _RadioTile(
+                    label: '3.3%',
+                    desc: '프리랜서·아르바이트에 가장 많이 써요',
+                    selected: _tax == pol.TaxConfig.biz33,
+                    onTap: () => setState(() {
+                      _tax = pol.TaxConfig.biz33;
+                      _customTaxMode = false;
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                  _RadioTile(
+                    label: '6.6%',
+                    desc: '일용직 근로소득세',
+                    selected: _tax == pol.TaxConfig.day66,
+                    onTap: () => setState(() {
+                      _tax = pol.TaxConfig.day66;
+                      _customTaxMode = false;
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                  _RadioTile(
+                    label: '직접 입력',
+                    desc: '세율을 직접 입력해요',
+                    selected: _customTaxMode,
+                    onTap: () => setState(() {
+                      _customTaxMode = true;
+                      _tax = pol.TaxConfigCustomPercent(
+                          double.tryParse(_customTaxCtl.text) ?? 0.0);
+                    }),
+                  ),
+                  if (_customTaxMode) ...[
+                    const SizedBox(height: 6),
+                    _BigNumberInput(
+                      controller: _customTaxCtl,
+                      suffix: '%',
+                      hint: '0.0',
+                      onChanged: (s) => setState(() {
+                        _tax = pol.TaxConfigCustomPercent(
+                            double.tryParse(s) ?? 0.0);
+                      }),
+                      allowDecimal: true,
                     ),
-                    child: const Text('완료',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700, color: Colors.white)),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // ═══ 보험 ═══
+                  const _SectionTitle(text: '4대보험'),
+                  const SizedBox(height: 8),
+                  _RadioTile(
+                    label: '없음',
+                    desc: '보험 공제 없이 받아요',
+                    selected: _ins is pol.InsuranceNone,
+                    onTap: () =>
+                        setState(() => _ins = const pol.InsuranceNone()),
+                  ),
+                  const SizedBox(height: 6),
+                  _RadioTile(
+                    label: '고용보험만',
+                    desc: '나중에 실업급여를 받을 수 있어요',
+                    selected: _ins is pol.InsuranceEmploymentOnly,
+                    onTap: () => setState(
+                        () => _ins = const pol.InsuranceEmploymentOnly()),
+                  ),
+                  const SizedBox(height: 6),
+                  _RadioTile(
+                    label: '4대보험 전체',
+                    desc: '고용·국민연금·건강·산재 모두',
+                    selected: _ins is pol.InsuranceFour,
+                    onTap: () =>
+                        setState(() => _ins = const pol.InsuranceFour()),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // ═══ 추가수당 ═══
+                  const _SectionTitle(text: '추가 수당'),
+                  const SizedBox(height: 8),
+
+                  // ── 주휴수당 (showWeeklyToggles=true일 때만)
+                  if (widget.showWeeklyToggles) ...[
+                    _SurchargeTile(
+                      label: '주휴수당',
+                      desc: '주 15시간 이상 근무 시 하루치 급여 추가',
+                      on: _weeklyHolidayOn,
+                      controller: null,
+                      onToggle: (v) => setState(() => _weeklyHolidayOn = v),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+
+                  // ── 일 8시간 초과 연장수당
+                  _SurchargeTile(
+                    label: '연장수당 (일 8시간 초과)',
+                    desc: '하루 8시간 넘으면 초과분 추가 지급',
+                    on: _dailyOverOn,
+                    controller: _dailyOverPctCtl,
+                    onToggle: (v) => setState(() {
+                      _dailyOverOn = v;
+                      if (v) _weeklyOverOn = false; // 둘 중 하나만
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ── 주 40시간 초과 연장수당 (showWeeklyToggles=true일 때만)
+                  if (widget.showWeeklyToggles) ...[
+                    _SurchargeTile(
+                      label: '연장수당 (주 40시간 초과)',
+                      desc: '한 주 40시간 넘으면 초과분 추가 지급',
+                      on: _weeklyOverOn,
+                      controller: _weeklyOverPctCtl,
+                      onToggle: (v) => setState(() {
+                        _weeklyOverOn = v;
+                        if (v) _dailyOverOn = false; // 둘 중 하나만
+                      }),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+
+                  // ── 휴일수당
+                  _SurchargeTile(
+                    label: '휴일 근무 수당',
+                    desc: '공휴일이나 쉬는 날 근무',
+                    on: _holOn,
+                    controller: _holPctCtl,
+                    onToggle: (v) => setState(() => _holOn = v),
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ── 야간수당
+                  _SurchargeTile(
+                    label: '야간 수당',
+                    desc: '밤 10시 ~ 새벽 6시',
+                    on: _nightOn,
+                    controller: _nightPctCtl,
+                    onToggle: (v) => setState(() => _nightOn = v),
                   ),
                 ],
               ),
             ),
-            Container(height: 1, color: const Color(0xFFF0F0F5)),
-
-            // ── 스크롤 본문
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.80),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ═══ 세금 ═══
-                    const _SectionTitle(text: '세금'),
-                    const SizedBox(height: 8),
-                    _RadioTile(
-                      label: '없음',
-                      desc: '세금 공제 없이 전액 받아요',
-                      selected: _tax == pol.TaxConfig.none && !_customTaxMode,
-                      onTap: () => setState(() {
-                        _tax = pol.TaxConfig.none;
-                        _customTaxMode = false;
-                      }),
-                    ),
-                    const SizedBox(height: 6),
-                    _RadioTile(
-                      label: '3.3%',
-                      desc: '프리랜서·아르바이트에 가장 많이 써요',
-                      selected: _tax == pol.TaxConfig.biz33,
-                      onTap: () => setState(() {
-                        _tax = pol.TaxConfig.biz33;
-                        _customTaxMode = false;
-                      }),
-                    ),
-                    const SizedBox(height: 6),
-                    _RadioTile(
-                      label: '6.6%',
-                      desc: '일용직 근로소득세',
-                      selected: _tax == pol.TaxConfig.day66,
-                      onTap: () => setState(() {
-                        _tax = pol.TaxConfig.day66;
-                        _customTaxMode = false;
-                      }),
-                    ),
-                    const SizedBox(height: 6),
-                    _RadioTile(
-                      label: '직접 입력',
-                      desc: '세율을 직접 입력해요',
-                      selected: _customTaxMode,
-                      onTap: () => setState(() {
-                        _customTaxMode = true;
-                        _tax = pol.TaxConfigCustomPercent(
-                            double.tryParse(_customTaxCtl.text) ?? 0.0);
-                      }),
-                    ),
-                    if (_customTaxMode) ...[
-                      const SizedBox(height: 6),
-                      _BigNumberInput(
-                        controller: _customTaxCtl,
-                        suffix: '%',
-                        hint: '0.0',
-                        onChanged: (s) => setState(() {
-                          _tax = pol.TaxConfigCustomPercent(
-                              double.tryParse(s) ?? 0.0);
-                        }),
-                        allowDecimal: true,
-                      ),
-                    ],
-
-                    const SizedBox(height: 24),
-
-                    // ═══ 보험 ═══
-                    const _SectionTitle(text: '4대보험'),
-                    const SizedBox(height: 8),
-                    _RadioTile(
-                      label: '없음',
-                      desc: '보험 공제 없이 받아요',
-                      selected: _ins is pol.InsuranceNone,
-                      onTap: () =>
-                          setState(() => _ins = const pol.InsuranceNone()),
-                    ),
-                    const SizedBox(height: 6),
-                    _RadioTile(
-                      label: '고용보험만',
-                      desc: '나중에 실업급여를 받을 수 있어요',
-                      selected: _ins is pol.InsuranceEmploymentOnly,
-                      onTap: () => setState(
-                          () => _ins = const pol.InsuranceEmploymentOnly()),
-                    ),
-                    const SizedBox(height: 6),
-                    _RadioTile(
-                      label: '4대보험 전체',
-                      desc: '고용·국민연금·건강·산재 모두',
-                      selected: _ins is pol.InsuranceFour,
-                      onTap: () =>
-                          setState(() => _ins = const pol.InsuranceFour()),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ═══ 추가수당 ═══
-                    const _SectionTitle(text: '추가 수당'),
-                    const SizedBox(height: 8),
-
-                    // ── 주휴수당 (showWeeklyToggles=true일 때만)
-                    if (widget.showWeeklyToggles) ...[
-                      _SurchargeTile(
-                        label: '주휴수당',
-                        desc: '주 15시간 이상 근무 시 하루치 급여 추가',
-                        on: _weeklyHolidayOn,
-                        controller: null,
-                        onToggle: (v) => setState(() => _weeklyHolidayOn = v),
-                      ),
-                      const SizedBox(height: 6),
-                    ],
-
-                    // ── 일 8시간 초과 연장수당
-                    _SurchargeTile(
-                      label: '연장수당 (일 8시간 초과)',
-                      desc: '하루 8시간 넘으면 초과분 추가 지급',
-                      on: _dailyOverOn,
-                      controller: _dailyOverPctCtl,
-                      onToggle: (v) => setState(() {
-                        _dailyOverOn = v;
-                        if (v) _weeklyOverOn = false; // 둘 중 하나만
-                      }),
-                    ),
-                    const SizedBox(height: 6),
-
-                    // ── 주 40시간 초과 연장수당 (showWeeklyToggles=true일 때만)
-                    if (widget.showWeeklyToggles) ...[
-                      _SurchargeTile(
-                        label: '연장수당 (주 40시간 초과)',
-                        desc: '한 주 40시간 넘으면 초과분 추가 지급',
-                        on: _weeklyOverOn,
-                        controller: _weeklyOverPctCtl,
-                        onToggle: (v) => setState(() {
-                          _weeklyOverOn = v;
-                          if (v) _dailyOverOn = false; // 둘 중 하나만
-                        }),
-                      ),
-                      const SizedBox(height: 6),
-                    ],
-
-                    // ── 휴일수당
-                    _SurchargeTile(
-                      label: '휴일 근무 수당',
-                      desc: '공휴일이나 쉬는 날 근무',
-                      on: _holOn,
-                      controller: _holPctCtl,
-                      onToggle: (v) => setState(() => _holOn = v),
-                    ),
-                    const SizedBox(height: 6),
-
-                    // ── 야간수당
-                    _SurchargeTile(
-                      label: '야간 수당',
-                      desc: '밤 10시 ~ 새벽 6시',
-                      on: _nightOn,
-                      controller: _nightPctCtl,
-                      onToggle: (v) => setState(() => _nightOn = v),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -493,6 +493,8 @@ class _BigNumberInput extends StatelessWidget {
                     allowDecimal ? RegExp(r'[0-9.]') : RegExp(r'[0-9]')),
               ],
               textAlign: TextAlign.right,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => FocusScope.of(context).unfocus(),
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
@@ -602,6 +604,8 @@ class _SurchargeTile extends StatelessWidget {
                       controller: controller,
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => FocusScope.of(context).unfocus(),
                       style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w900,

@@ -7,13 +7,13 @@ class RoleRepository {
   static const _prefix = 'user_role__'; // ✅ uid별 key 분리
   String _keyOf(String uid) => '$_prefix$uid';
 
-  // ✅ 변경 알림 브로드캐스트
+  // ✅ uid별 역할 변경 알림 브로드캐스트
   static final StreamController<String> _changed =
       StreamController<String>.broadcast();
 
-  /// ✅ 장기 안정화:
-  /// - StreamBuilder 단일 구독에 최적(불필요한 StreamController 생성/관리 제거)
-  /// - 최초 1회 emit + 이후 uid 변경 이벤트 때마다 re-emit
+  /// ✅ uid 기준 역할 스트림
+  /// - 최초 1회 현재 저장값 emit
+  /// - 이후 같은 uid에 대한 set/clear 발생 시 다시 emit
   Stream<UserRole?> watchRole(String uid) async* {
     final id = uid.trim();
     if (id.isEmpty) {
@@ -24,7 +24,7 @@ class RoleRepository {
     // 최초 emit
     yield await getRole(id);
 
-    // 변경 이벤트 때마다 emit
+    // 변경 이벤트 반영
     await for (final changedUid in _changed.stream) {
       if (changedUid != id) continue;
       yield await getRole(id);
@@ -36,11 +36,11 @@ class RoleRepository {
     if (id.isEmpty) return null;
 
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_keyOf(id));
-    if (v == null) return null;
+    final raw = prefs.getString(_keyOf(id));
+    if (raw == null) return null;
 
-    for (final r in UserRole.values) {
-      if (r.name == v) return r;
+    for (final role in UserRole.values) {
+      if (role.name == raw) return role;
     }
     return null;
   }

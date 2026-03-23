@@ -19,10 +19,12 @@ class OwnerWorkerCalendarAsAlbaScreen extends StatefulWidget {
     super.key,
     required this.store,
     required this.worker,
+    this.endedAt,
   });
 
   final Store store;
   final StoreWorker worker;
+  final DateTime? endedAt;
 
   @override
   State<OwnerWorkerCalendarAsAlbaScreen> createState() =>
@@ -43,7 +45,6 @@ class _OwnerWorkerCalendarAsAlbaScreenState
         ownerUid: store.ownerUid,
         storeId: store.id,
         workerUid: worker.workerUid,
-        recentDays: 365,
       ),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
@@ -61,7 +62,14 @@ class _OwnerWorkerCalendarAsAlbaScreenState
           );
         }
 
-        final schedules = (snap.data ?? const <StoreSchedule>[]);
+        final rawSchedules = snap.data ?? const <StoreSchedule>[];
+        final endedAt = widget.endedAt;
+        final schedules = endedAt == null
+            ? rawSchedules
+            : rawSchedules
+                .where((s) => !DateTime(s.year, s.month, s.day).isAfter(
+                    DateTime(endedAt.year, endedAt.month, endedAt.day)))
+                .toList(growable: false);
 
         final effectiveWage = _effectiveWage(store: store, worker: worker);
         final effectivePayDay = _effectivePayDay(store: store, worker: worker);

@@ -57,13 +57,20 @@ class AuthService {
         );
         return cred.user;
       } on FirebaseAuthException catch (e) {
-        if (e.code == 'user-not-found') {
-          final cred =
-              await FirebaseAuth.instance.createUserWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          return cred.user;
+        if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+          try {
+            final cred =
+                await FirebaseAuth.instance.createUserWithEmailAndPassword(
+              email: email,
+              password: password,
+            );
+            return cred.user;
+          } on FirebaseAuthException catch (e2) {
+            if (e2.code == 'email-already-in-use') {
+              rethrow;
+            }
+            rethrow;
+          }
         }
         rethrow;
       }

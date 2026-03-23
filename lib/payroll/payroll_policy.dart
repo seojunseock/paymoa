@@ -201,7 +201,12 @@ PeriodPayPreview computePreviewForDate({
       break;
 
     case PayCycleType.monthly:
-      period = _calendarMonth(d0);
+      final startDay = policy.monthlyStartDay;
+      if (startDay != null && startDay > 1) {
+        period = _anchorMonth(d0, startDay);
+      } else {
+        period = _calendarMonth(d0);
+      }
       break;
 
     case PayCycleType.customDays:
@@ -243,6 +248,22 @@ PayPeriod _twoWeeksFromAnchor(DateTime d, DateTime anchor) {
   final k = diff ~/ 14;
   final start = s0.add(Duration(days: k * 14));
   return PayPeriod(start: start, end: start.add(const Duration(days: 13)));
+}
+
+PayPeriod _anchorMonth(DateTime d, int startDay) {
+  if (d.day >= startDay) {
+    final start = DateTime(d.year, d.month, startDay);
+    final nm = d.month == 12 ? 1 : d.month + 1;
+    final ny = d.month == 12 ? d.year + 1 : d.year;
+    final end = DateTime(ny, nm, startDay).subtract(const Duration(days: 1));
+    return PayPeriod(start: start, end: end);
+  } else {
+    final pm = d.month == 1 ? 12 : d.month - 1;
+    final py = d.month == 1 ? d.year - 1 : d.year;
+    final start = DateTime(py, pm, startDay);
+    final end = DateTime(d.year, d.month, startDay).subtract(const Duration(days: 1));
+    return PayPeriod(start: start, end: end);
+  }
 }
 
 PayPeriod _calendarMonth(DateTime d) {

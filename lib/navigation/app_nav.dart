@@ -75,10 +75,14 @@ class AppNav {
   static Future<void> openOwnerStoreDetail({
     required BuildContext context,
     required Store store,
+    bool isReadOnly = false,
   }) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => OwnerStoreDetailScreen(store: store),
+        builder: (_) => OwnerStoreDetailScreen(
+          store: store,
+          isReadOnly: isReadOnly,
+        ),
       ),
     );
   }
@@ -107,6 +111,7 @@ class AppNav {
     BuildContext context, {
     required Store store,
     required StoreWorker worker,
+    DateTime? endedAt,
   }) async {
     await Navigator.push(
       context,
@@ -114,6 +119,7 @@ class AppNav {
         builder: (_) => OwnerWorkerCalendarAsAlbaScreen(
           store: store,
           worker: worker,
+          endedAt: endedAt,
         ),
       ),
     );

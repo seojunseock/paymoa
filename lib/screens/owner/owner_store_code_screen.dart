@@ -72,7 +72,7 @@ class _OwnerStoreCodeScreenState extends State<OwnerStoreCodeScreen>
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(
             children: [
@@ -277,7 +277,7 @@ class _OwnerStoreCodeScreenState extends State<OwnerStoreCodeScreen>
                 ],
               ),
 
-              const Spacer(),
+              const SizedBox(height: 24),
 
               // ── 완료 버튼
               SizedBox(

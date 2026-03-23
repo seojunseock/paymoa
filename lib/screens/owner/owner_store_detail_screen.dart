@@ -18,18 +18,23 @@ import '../../policies/policies.dart';
 import '../../policies/policy_mapper.dart' as pm;
 
 import '../../payroll/payroll_engine.dart';
+import '../../ads/ad_service.dart';
 import '../../payroll/payroll_policy.dart';
 import '../../payroll/payroll_document_service.dart';
 
 import '../../models/ui_calendar_models.dart';
+import '../subscription_screen.dart';
+import '../../subscription/subscription_service.dart';
 
 class OwnerStoreDetailScreen extends StatefulWidget {
   const OwnerStoreDetailScreen({
     super.key,
     required this.store,
+    this.isReadOnly = false,
   });
 
   final Store store;
+  final bool isReadOnly;
 
   @override
   State<OwnerStoreDetailScreen> createState() => _OwnerStoreDetailScreenState();
@@ -126,7 +131,6 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
             stream: _scheduleRepo.watchRecentSchedulesForStore(
               ownerUid: store.ownerUid,
               storeId: store.id,
-              recentDays: 365,
             ),
             builder: (context, sSnap) {
               if (sSnap.connectionState == ConnectionState.waiting) {
@@ -150,9 +154,66 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
               final alive = allWorkers.map((w) => w.workerUid).toSet();
               _payCache.removeWhere((k, _) => !alive.contains(k));
 
+              // ── 구독 만료 시 알바생 한도 계산 ──────────────────
+              final subInfo = SubscriptionService.instance.cached;
+              final isExpiredPlan = kSubscriptionEnabled &&
+                  subInfo?.status == SubscriptionStatus.expired;
+              final storeIsReadOnly = widget.isReadOnly;
+              // 한도는 만료 시에만 적용
+              final workerLimit =
+                  isExpiredPlan ? (subInfo?.plan.maxWorkers ?? 999) : 999;
+              // ────────────────────────────────────────────────
+
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 children: [
+                  // ── 구독 만료 배너 ──────────────────────────
+                  if (isExpiredPlan || storeIsReadOnly) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEE2E2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_outline_rounded,
+                              size: 16, color: Color(0xFFF43F5E)),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              '구독이 만료됐어요. 일부 기능이 제한됩니다.',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFF43F5E)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => SubscriptionSheet.show(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF43F5E),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                '플랜 업그레이드',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   // ── 초대 코드 한 줄 ──
                   _CodeRow(
                     code: joinCode,
@@ -166,83 +227,51 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
 
                   const SizedBox(height: 10),
 
-                  // ── 급여대장 다운로드 ──
-                  Row(
-                    children: [
-                      // 왼쪽: 지난달 받기
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _exportPastMonth(
-                              store, activeWorkers),
-                          child: Container(
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              border:
-                                  Border.all(color: const Color(0xFFE5E7EB)),
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.calendar_month,
-                                    size: 18, color: Color(0xFF6B7280)),
-                                SizedBox(width: 6),
-                                Text(
-                                  '지난달 받기',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF374151),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                  // ── 문서 받기 ──
+                  _DocRow(
+                    payDay: store.payDay ?? 15,
+                    onPickDate: () => _pickYearMonthWheel(context),
+                    onExport: (type, year, month) async {
+                      // 잠긴 알바생 제외: 활성 한도 내 인원 + 내보낸 알바생
+                      final exportWorkers = (isExpiredPlan &&
+                              activeWorkers.length > workerLimit)
+                          ? [
+                              ...activeWorkers.sublist(0, workerLimit),
+                              ...endedWorkers,
+                            ]
+                          : allWorkers;
 
-                      const SizedBox(width: 10),
+                      void doExport() => _exportDoc(
+                            store: store,
+                            workers: exportWorkers,
+                            docType: type,
+                            year: year,
+                            month: month,
+                          );
 
-                      // 오른쪽: 이번 달 급여대장
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _exportThisMonth(
-                              store, activeWorkers, schedulesRecent),
-                          child: Container(
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF7C3AED),
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color:
-                                      const Color(0xFF7C3AED).withOpacity(0.3),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.download,
-                                    size: 18, color: Colors.white),
-                                SizedBox(width: 6),
-                                Text(
-                                  '이번 달 급여대장',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                      if (!kSubscriptionEnabled) {
+                        // 구독 비활성화: 광고 없이 바로 받기
+                        doExport();
+                      } else {
+                        final tier =
+                            SubscriptionService.instance.cached?.tier;
+                        final isPaid = tier != null &&
+                            tier != PlanTier.free;
+                        if (isPaid) {
+                          // 유료 플랜: 광고 없이 바로 받기
+                          doExport();
+                        } else {
+                          // 무료 플랜: 리워드 광고 시청 후 받기
+                          AdService.instance.showRewardedAd(
+                            onRewarded: () {
+                              if (!context.mounted) return;
+                              doExport();
+                            },
+                            onNotReady: doExport,
+                          );
+                        }
+                      }
+                    },
                   ),
 
                   const SizedBox(height: 10),
@@ -272,7 +301,9 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                       message: '알바생이 “매장 코드”로 참여하면 여기서 보입니다.',
                     )
                   else
-                    ...activeWorkers.map((w) {
+                    ...activeWorkers.asMap().entries.map((entry) {
+                      final idx = entry.key;
+                      final w = entry.value;
                       final wsRaw =
                           byWorker[w.workerUid] ?? const <StoreSchedule>[];
                       final ws = [...wsRaw]..sort(_scheduleSort);
@@ -283,11 +314,16 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                         schedulesSorted: ws,
                       );
 
+                      // 매장 잠금 또는 알바생 한도 초과 시 잠금
+                      final isLocked =
+                          storeIsReadOnly || (isExpiredPlan && idx >= workerLimit);
+
                       return Padding(
                         key: ValueKey('active_${w.workerUid}'),
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _WorkerSimpleCard(
                           enabled: true,
+                          isLocked: isLocked,
                           name: _displayName(w),
                           badge: _badgeText(worker: w),
                           wageText: '${_comma(payPair.effectiveWage)}원',
@@ -321,7 +357,14 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                       children: endedWorkers.map((w) {
                         final wsRaw =
                             byWorker[w.workerUid] ?? const <StoreSchedule>[];
-                        final ws = [...wsRaw]..sort(_scheduleSort);
+                        // endedAt 이후 스케줄 제외
+                        final endDate = w.endedAt;
+                        final ws = [...wsRaw]
+                          ..removeWhere((s) =>
+                              endDate != null &&
+                              DateTime(s.year, s.month, s.day).isAfter(DateTime(
+                                  endDate.year, endDate.month, endDate.day)))
+                          ..sort(_scheduleSort);
 
                         final payPair = _computePayPairCached(
                           store: store,
@@ -349,6 +392,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                               context,
                               store: store,
                               worker: w,
+                              endedAt: w.endedAt,
                             ),
                             onEdit: () => AppNav.openOwnerWorkerSettings(
                               context,
@@ -356,6 +400,10 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                               worker: w,
                               workerSchedules:
                                   byWorker[w.workerUid] ?? const [],
+                            ),
+                            onDelete: () => _onDeleteWorkerCompletely(
+                              store: store,
+                              worker: w,
                             ),
                           ),
                         );
@@ -415,13 +463,10 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
 
   Future<_YearMonth?> _pickYearMonthWheel(BuildContext context) async {
     final now = DateTime.now();
-    final defaultYear = now.year;
+    final defaultYear = now.year.clamp(2025, 2040);
     final defaultMonth = now.month;
 
-    final years = <int>[];
-    for (int y = defaultYear - 3; y <= defaultYear + 1; y++) {
-      years.add(y);
-    }
+    final years = List.generate(2040 - 2025 + 1, (i) => 2025 + i);
     final months = List.generate(12, (i) => i + 1);
 
     int yearIndex = years.indexOf(defaultYear);
@@ -548,8 +593,6 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         endInclusive: period.end,
       );
 
-      // TODO(2차): exported(ended) worker의 이름 익명 처리 + 근무 있는 기간만 포함 규칙 반영은
-      // PayrollDocumentService에서 처리하는게 정석.
       final rows = _docService.buildPeriodDocument(
         store: store,
         workers: workers,
@@ -557,6 +600,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         period: period,
       );
 
+      if (!context.mounted) return;
       await _copyRowsAsCsv(context: context, title: '급여대장', rows: rows);
     });
   }
@@ -590,6 +634,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         period: period,
       );
 
+      if (!context.mounted) return;
       await _copyRowsAsCsv(context: context, title: '급여대장', rows: rows);
     });
   }
@@ -620,6 +665,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         month: month,
       );
 
+      if (!context.mounted) return;
       await _copyRowsAsCsv(
           context: context, title: '급여대장 ${year}년 ${month}월', rows: rows);
     });
@@ -720,15 +766,10 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
     return lines.join('\n');
   }
 
-  // ─────────────────────────────────────────
-  // Export worker 2-step
-  // ─────────────────────────────────────────
-
   Future<void> _onExportWorker({
     required Store store,
     required StoreWorker worker,
   }) async {
-    // active 알바생만 내보낼 수 있음
     if (!worker.isActive) return;
 
     final ok = await showDialog<bool>(
@@ -761,9 +802,36 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Pay preview (cached)
-  // ─────────────────────────────────────────
+  Future<void> _onDeleteWorkerCompletely({
+    required Store store,
+    required StoreWorker worker,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('완전 삭제할까요?'),
+        content: const Text('모든 근무 기록과 정보가 영구적으로 삭제됩니다. 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: Color(0xFFF43F5E))),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || ok != true) return;
+    await _workerRepo.deleteWorkerCompletely(
+      ownerUid: store.ownerUid,
+      storeId: store.id,
+      workerUid: worker.workerUid,
+    );
+  }
 
   _PayPairPreview _computePayPairCached({
     required Store store,
@@ -815,7 +883,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         endMinute: s.endMinute,
         breakMinutes: s.breakMinutes,
         workType: _mapWorkType(s.workType),
-        overrideHourlyWage: s.overrideHourlyWage, // ✅ 날짜별 시급 반영
+        overrideHourlyWage: s.overrideHourlyWage,
       );
     }).toList(growable: false);
 
@@ -829,18 +897,17 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
     );
 
     final now = DateTime.now();
-    // ✅ 날짜별 가산정책 콜백 (policyHistory 기반)
-    // inheritFromStore=true → 매장 policyHistory 사용
-    // inheritFromStore=false → 개인 policyHistory 사용
     final ph =
         worker.inheritFromStore ? store.policyHistory : worker.policyHistory;
     SurchargePolicy Function(DateTime)? surchargeAtFn;
+    TaxConfig Function(DateTime)? taxAtFn;
+    InsuranceConfig Function(DateTime)? insuranceAtFn;
     if (ph.isNotEmpty) {
       surchargeAtFn = (date) => ph.surchargeAt(date) ?? surcharge;
+      taxAtFn = (date) => ph.taxAt(date) ?? effectiveTax;
+      insuranceAtFn = (date) => ph.insuranceAt(date) ?? effectiveInsurance;
     }
 
-    // ✅ 날짜별 시급 콜백 (policyHistory에서 wageBands 빌드)
-    // overrideHourlyWage=null 스케줄에서도 날짜별 정확한 시급 반환
     final wagePh =
         worker.inheritFromStore ? store.policyHistory : worker.policyHistory;
     int Function(String, DateTime)? wageAtFn;
@@ -851,7 +918,6 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         ..sort((a, b) => a.effectiveFrom.compareTo(b.effectiveFrom));
       if (wageEntries.isNotEmpty) {
         final bands = <({DateTime from, int wage})>[];
-        // ✅ 선행 밴드 (첫 번째 변경 이전 시급)
         final prevW = wageEntries.first.rawPolicy['previousHourlyWage'];
         if (prevW != null) {
           final pw = (prevW is int)
@@ -875,10 +941,11 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
             final d0 = DateTime(date.year, date.month, date.day);
             int? last;
             for (final b in bands) {
-              if (!b.from.isAfter(d0))
+              if (!b.from.isAfter(d0)) {
                 last = b.wage;
-              else
+              } else {
                 break;
+              }
             }
             return last ?? effectiveWage;
           };
@@ -893,8 +960,10 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
       tax: effectiveTax,
       insurance: effectiveInsurance,
       surchargePolicy: surcharge,
-      surchargeAt: surchargeAtFn, // ✅ 날짜별 정책 이력
-      wageAt: wageAtFn, // ✅ 날짜별 시급
+      surchargeAt: surchargeAtFn,
+      taxAt: taxAtFn,
+      insuranceAt: insuranceAtFn,
+      wageAt: wageAtFn,
       anyDateInPeriod: now,
     );
 
@@ -906,8 +975,10 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
       tax: effectiveTax,
       insurance: effectiveInsurance,
       surchargePolicy: surcharge,
-      surchargeAt: surchargeAtFn, // ✅ 날짜별 정책 이력
-      wageAt: wageAtFn, // ✅ 날짜별 시급
+      surchargeAt: surchargeAtFn,
+      taxAt: taxAtFn,
+      insuranceAt: insuranceAtFn,
+      wageAt: wageAtFn,
       anyDateInPeriod: prevSeed,
     );
 
@@ -934,12 +1005,13 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
     return out;
   }
 
-  /// 이번 달 급여대장 생성 + 공유
-  Future<void> _exportThisMonth(
-    Store store,
-    List<StoreWorker> workers,
-    List<StoreSchedule> schedules,
-  ) async {
+  Future<void> _exportDoc({
+    required Store store,
+    required List<StoreWorker> workers,
+    required _DocType docType,
+    required int year,
+    required int month,
+  }) async {
     try {
       showDialog(
         context: context,
@@ -947,86 +1019,78 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
         builder: (_) => const Center(child: CircularProgressIndicator()),
       );
 
-      final service = PayrollExcelService();
-      await service.generateAndSharePayroll(
-        store: store,
-        workers: workers,
-        schedules: schedules,
-      );
+      final svc = PayrollExcelService();
+
+      if (docType == _DocType.simplifiedStatement) {
+        final halfYear = month <= 6 ? 1 : 2;
+        final startM = halfYear == 1 ? 1 : 7;
+        final endM = halfYear == 1 ? 6 : 12;
+
+        final fetchStart =
+            DateTime(year, startM, 1).subtract(const Duration(days: 62));
+        final fetchEnd = DateTime(year, endM + 1, 0);
+
+        final schedules = await _scheduleRepo.fetchSchedulesForStoreInRange(
+          ownerUid: store.ownerUid,
+          storeId: store.id,
+          startInclusive: fetchStart,
+          endInclusive: fetchEnd,
+        );
+
+        await svc.generateSimplifiedStatement(
+          store: store,
+          workers: workers,
+          schedules: schedules,
+          year: year,
+          halfYear: halfYear,
+        );
+      } else {
+        final monthStart = DateTime(year, month, 1);
+        final monthEnd = DateTime(year, month + 1, 0);
+
+        final fetchStart = monthStart.subtract(const Duration(days: 62));
+        final fetchEnd = monthEnd;
+
+        final schedules = await _scheduleRepo.fetchSchedulesForStoreInRange(
+          ownerUid: store.ownerUid,
+          storeId: store.id,
+          startInclusive: fetchStart,
+          endInclusive: fetchEnd,
+        );
+
+        if (docType == _DocType.wageStatement) {
+          await svc.generateWageStatements(
+            store: store,
+            workers: workers,
+            schedules: schedules,
+            year: year,
+            month: month,
+          );
+        } else {
+          await svc.generatePayrollLedger(
+            store: store,
+            workers: workers,
+            schedules: schedules,
+            year: year,
+            month: month,
+          );
+        }
+      }
 
       if (!mounted) return;
       Navigator.pop(context);
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('이번 달 급여대장을 공유했습니다!'),
+          content: Text('문서를 공유했습니다!'),
           duration: Duration(seconds: 2),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('오류: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  /// 지난달 급여대장 생성 + 공유 (월 선택)
-  Future<void> _exportPastMonth(
-    Store store,
-    List<StoreWorker> workers,
-  ) async {
-    final picked = await _pickYearMonthWheel(context);
-    if (!mounted || picked == null) return;
-
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
-
-      // ✅ 선택한 월의 스케줄을 직접 조회 (watchRecentSchedulesForStore는 120일만 커버)
-      final startOfMonth = DateTime(picked.year, picked.month, 1);
-      final endOfMonth = DateTime(picked.year, picked.month + 1, 0);
-      final monthSchedules = await _scheduleRepo.fetchSchedulesForStoreInRange(
-        ownerUid: store.ownerUid,
-        storeId: store.id,
-        startInclusive: startOfMonth,
-        endInclusive: endOfMonth,
-      );
-
-      final service = PayrollExcelService();
-      await service.generatePayrollForMonth(
-        store: store,
-        workers: workers,
-        schedules: monthSchedules,
-        year: picked.year,
-        month: picked.month,
-      );
-
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${picked.year}년 ${picked.month}월 급여대장을 공유했습니다!'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('오류: $e'),
+          content: const Text('오류가 발생했어요. 잠시 후 다시 시도해 주세요.'),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
         ),
@@ -1040,10 +1104,6 @@ class _YearMonth {
   final int month;
   const _YearMonth(this.year, this.month);
 }
-
-/* ─────────────────────────────────────────
-   PAY MODELS
-───────────────────────────────────────── */
 
 class _PayOnePreview {
   final DateTime payDate;
@@ -1080,10 +1140,6 @@ class _PayPairPreview {
     required this.cur,
   });
 }
-
-/* ─────────────────────────────────────────
-   POLICY / EFFECTIVE RESOLVERS
-───────────────────────────────────────── */
 
 int _effectiveWage({required Store store, required StoreWorker worker}) {
   final int? storeWage = store.defaultHourlyWage;
@@ -1145,10 +1201,6 @@ WorkType _mapWorkType(String raw) {
   }
 }
 
-/* ─────────────────────────────────────────
-   UI helpers
-───────────────────────────────────────── */
-
 int _scheduleSort(StoreSchedule a, StoreSchedule b) {
   final ak = a.year * 10000 + a.month * 100 + a.day;
   final bk = b.year * 10000 + b.month * 100 + b.day;
@@ -1163,15 +1215,10 @@ String _displayName(StoreWorker w) {
   return dn.isEmpty ? w.workerUid : dn;
 }
 
-String _payLabel(DateTime payDate) => '${payDate.month}월';
+String _payLabel(DateTime payDate) => '${payDate.month}/${payDate.day}';
 String _badgeText({required StoreWorker worker}) =>
     worker.inheritFromStore ? '기본' : '개인';
 
-/* ─────────────────────────────────────────
-   UI Widgets
-───────────────────────────────────────── */
-
-// ── 초대 코드 한 줄 ─────────────────────────
 class _CodeRow extends StatelessWidget {
   const _CodeRow({required this.code, required this.onCopy});
   final String code;
@@ -1233,91 +1280,178 @@ class _CodeRow extends StatelessWidget {
   }
 }
 
-// ── 문서 받기 행 ──────────────────────────────
-class _DocRow extends StatelessWidget {
+enum _DocType {
+  wageStatement,
+  payrollLedger,
+  simplifiedStatement,
+}
+
+extension _DocTypeLabel on _DocType {
+  String get label {
+    switch (this) {
+      case _DocType.wageStatement:
+        return '임금명세서';
+      case _DocType.payrollLedger:
+        return '급여대장';
+      case _DocType.simplifiedStatement:
+        return '간이지급명세서';
+    }
+  }
+}
+
+class _DocRow extends StatefulWidget {
   const _DocRow({
-    required this.store,
-    required this.onPickMonth,
-    required this.onThisMonth,
+    required this.payDay,
+    required this.onPickDate,
+    required this.onExport,
   });
-  final Store store;
-  final VoidCallback onPickMonth;
-  final VoidCallback onThisMonth;
+
+  final int payDay;
+  final Future<_YearMonth?> Function() onPickDate;
+  final Future<void> Function(_DocType type, int year, int month) onExport;
+
+  @override
+  State<_DocRow> createState() => _DocRowState();
+}
+
+class _DocRowState extends State<_DocRow> {
+  late int _year = DateTime.now().year;
+  late int _month = DateTime.now().month;
+  _DocType _docType = _DocType.wageStatement;
+
+  Future<void> _pickDate() async {
+    final picked = await widget.onPickDate();
+    if (picked == null) return;
+    setState(() {
+      _year = picked.year;
+      _month = picked.month;
+    });
+  }
+
+  int _displayPayDay() {
+    final lastDay = DateTime(_year, _month + 1, 0).day;
+    return widget.payDay.clamp(1, lastDay);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
+    final payDay = _displayPayDay();
 
-    // 급여일 기준 계산 (급여일 + 10일까지 현재달, 이후 다음달)
-    final payDay = (store.payDay ?? 15).clamp(1, 28);
-    final cutoffDay = (payDay + 10).clamp(1, 31);
-
-    // 현재 날짜가 cutoff를 넘었는지 확인
-    final passedCutoff = now.day > cutoffDay;
-
-    // 표시할 월 결정
-    final targetMonth =
-        passedCutoff ? (now.month == 12 ? 1 : now.month + 1) : now.month;
-
-    return Row(children: [
-      Expanded(
-        child: GestureDetector(
-          onTap: onPickMonth,
-          child: Container(
-            height: 52,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GestureDetector(
+            onTap: _pickDate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3EEFF),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.calendar_month_outlined,
+                      size: 17, color: Color(0xFF7C3AED)),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$_year년 $_month월 · $payDay일 급여일',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF3B0764),
+                    ),
+                  ),
+                  const Spacer(),
+                  const Icon(Icons.expand_more,
+                      size: 18, color: Color(0xFF7C3AED)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final t in _DocType.values) ...[
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _docType = t),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _docType == t
+                            ? const Color(0xFF7C3AED)
+                            : const Color(0xFFF3EEFF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        t.label,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _docType == t
+                              ? Colors.white
+                              : const Color(0xFF7C3AED),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (t != _DocType.simplifiedStatement) const SizedBox(width: 6),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () => widget.onExport(_docType, _year, _month),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C3AED),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF7C3AED).withValues(alpha: 0.3),
                     blurRadius: 8,
-                    offset: const Offset(0, 2))
-              ],
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Icon(Icons.calendar_month_outlined,
-                  size: 18, color: Color(0xFF6B7280)),
-              const SizedBox(width: 6),
-              const Text('기간 선택',
-                  style: TextStyle(
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.download_rounded, size: 18, color: Colors.white),
+                  SizedBox(width: 6),
+                  Text(
+                    '문서받기',
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF374151))),
-            ]),
-          ),
-        ),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        child: GestureDetector(
-          onTap: onThisMonth,
-          child: Container(
-            height: 52,
-            decoration: BoxDecoration(
-              color: const Color(0xFF7C3AED),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                    color: const Color(0xFF7C3AED).withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4))
-              ],
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Icon(Icons.download_rounded, size: 18, color: Colors.white),
-              const SizedBox(width: 6),
-              Text('${targetMonth}월 문서',
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ]),
           ),
-        ),
+        ],
       ),
-    ]);
+    );
   }
 }
 
@@ -1397,9 +1531,12 @@ class _WorkerSimpleCard extends StatefulWidget {
     required this.onExport,
     required this.onOpenCalendar,
     required this.onEdit,
+    this.onDelete,
+    this.isLocked = false,
   });
 
   final bool enabled;
+  final bool isLocked;
   final String name;
   final String badge;
   final String wageText;
@@ -1411,6 +1548,7 @@ class _WorkerSimpleCard extends StatefulWidget {
   final VoidCallback onExport;
   final VoidCallback onOpenCalendar;
   final VoidCallback onEdit;
+  final VoidCallback? onDelete;
 
   @override
   State<_WorkerSimpleCard> createState() => _WorkerSimpleCardState();
@@ -1422,8 +1560,74 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
 
   @override
   Widget build(BuildContext context) {
+    // 잠금 상태: 흐리게 + 자물쇠 아이콘 + 탭 시 구독 시트
+    if (widget.isLocked) {
+      return Opacity(
+        opacity: 0.4,
+        child: GestureDetector(
+          onTap: () => SubscriptionSheet.show(context),
+          child: Stack(children: [
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    const BorderRadius.horizontal(right: Radius.circular(16)),
+                border: Border.all(color: const Color(0xFFF3F4F6)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.name,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF111827),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '시급 ${widget.wageText}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF9CA3AF),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.lock_rounded,
+                      size: 18, color: Color(0xFF9CA3AF)),
+                ],
+              ),
+            ),
+            // 컬러 바 (보라색)
+            Positioned(
+              left: 0,
+              top: 7,
+              bottom: 7,
+              child: Container(
+                width: 4,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF7C3AED),
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(2),
+                    bottomRight: Radius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
+
     final opacity = widget.enabled ? 1.0 : 0.5;
-    // 가산정책 활성화 항목들
     final sur = widget.surcharge;
     final surchargeItems = <String>[];
     if (sur.nightEnabled) surchargeItems.add('야간 +${sur.nightPercent}%');
@@ -1484,7 +1688,6 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
                           color: _purple)),
                 ),
               ]),
-              // ✅ 항상 시급 + 급여 표시 (접힘/펼침 모두 동일)
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Column(
@@ -1510,7 +1713,6 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
               children: [
                 const Divider(height: 1, color: Color(0xFFF3F4F6)),
                 const SizedBox(height: 12),
-                // ✅ 가산정책 적용 항목
                 if (surchargeItems.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   const Divider(height: 1, color: Color(0xFFF3F4F6)),
@@ -1540,70 +1742,105 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
                       style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                 ],
                 const SizedBox(height: 14),
-                // 버튼 (active: 내보내기/달력/수정, inactive: 달력/수정만)
                 SizedBox(
                   height: 44,
-                  child: Row(children: [
-                    if (widget.enabled) ...[
-                      Expanded(
-                          child: TextButton.icon(
-                        onPressed: widget.onExport,
-                        icon: const Icon(Icons.person_remove_outlined,
-                            size: 16, color: Color(0xFFF43F5E)),
-                        label: const Text('내보내기',
-                            style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFF43F5E))),
-                        style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                      )),
-                      Container(
-                          width: 1, height: 22, color: const Color(0xFFE5E7EB)),
-                    ],
-                    Expanded(
-                        child: TextButton.icon(
-                      onPressed: widget.onOpenCalendar,
-                      icon: const Icon(Icons.calendar_today_outlined,
-                          size: 16, color: Color(0xFF6B7280)),
-                      label: const Text('달력',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF6B7280))),
-                      style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    )),
-                    Container(
-                        width: 1, height: 22, color: const Color(0xFFE5E7EB)),
-                    Expanded(
-                        child: TextButton.icon(
-                      onPressed: widget.enabled ? widget.onEdit : null,
-                      icon: Icon(Icons.edit_outlined,
-                          size: 16,
-                          color: widget.enabled
-                              ? _purple
-                              : const Color(0xFFD1D5DB)),
-                      label: Text('수정',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: widget.enabled
-                                  ? _purple
-                                  : const Color(0xFFD1D5DB))),
-                      style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    )),
-                  ]),
+                  child: widget.enabled
+                          ? Row(children: [
+                          Expanded(
+                              child: TextButton.icon(
+                            onPressed: widget.onExport,
+                            icon: const Icon(Icons.person_remove_outlined,
+                                size: 16, color: Color(0xFFF43F5E)),
+                            label: const Text('내보내기',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFF43F5E))),
+                            style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap),
+                          )),
+                          Container(
+                              width: 1,
+                              height: 22,
+                              color: const Color(0xFFE5E7EB)),
+                          Expanded(
+                              child: TextButton.icon(
+                            onPressed: widget.onOpenCalendar,
+                            icon: const Icon(Icons.calendar_today_outlined,
+                                size: 16, color: Color(0xFF6B7280)),
+                            label: const Text('달력',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF6B7280))),
+                            style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap),
+                          )),
+                          Container(
+                              width: 1,
+                              height: 22,
+                              color: const Color(0xFFE5E7EB)),
+                          Expanded(
+                              child: TextButton.icon(
+                            onPressed: widget.onEdit,
+                            icon: const Icon(Icons.edit_outlined,
+                                size: 16, color: _purple),
+                            label: const Text('수정',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: _purple)),
+                            style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap),
+                          )),
+                        ])
+                      : Row(children: [
+                          Expanded(
+                              child: TextButton.icon(
+                            onPressed: widget.onDelete,
+                            icon: const Icon(Icons.delete_forever_outlined,
+                                size: 16, color: Color(0xFFF43F5E)),
+                            label: const Text('완전삭제',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFF43F5E))),
+                            style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap),
+                          )),
+                          Container(
+                              width: 1,
+                              height: 22,
+                              color: const Color(0xFFE5E7EB)),
+                          Expanded(
+                              child: TextButton.icon(
+                            onPressed: widget.onOpenCalendar,
+                            icon: const Icon(Icons.calendar_today_outlined,
+                                size: 16, color: Color(0xFF6B7280)),
+                            label: const Text('달력보기',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF6B7280))),
+                            style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap),
+                          )),
+                        ]),
                 ),
               ],
             ),
           ),
         ),
-        // 컬러 바
         Positioned(
           left: 0,
           top: 6,
@@ -1657,7 +1894,6 @@ class _PayCell extends StatelessWidget {
   }
 }
 
-// 접힌 상태에 보이는 급여 배지
 class _PayBadge extends StatelessWidget {
   const _PayBadge(
       {required this.label, required this.value, this.highlight = false});
@@ -1685,10 +1921,6 @@ class _PayBadge extends StatelessWidget {
     );
   }
 }
-
-/* ─────────────────────────────────────────
-   helpers
-───────────────────────────────────────── */
 
 String _taxKey(TaxConfig tax) {
   if (tax == TaxConfig.none) return 'none';

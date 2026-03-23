@@ -42,7 +42,6 @@ class OwnerWorkerScheduleScreen extends StatelessWidget {
           ownerUid: ownerUid,
           storeId: storeId,
           workerUid: worker.workerUid,
-          recentDays: 365,
         ),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {

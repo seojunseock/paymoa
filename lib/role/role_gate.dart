@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../auth/login_screen.dart';
 import 'role_selection_screen.dart';
 import 'role_repository.dart';
+import 'consent_repository.dart';
+import '../screens/consent_screen.dart';
 
 import '../ui/app_shell.dart'; // 알바생
 import '../ui/app_shell_owner.dart'; // 사장님
@@ -11,15 +13,22 @@ import '../ui/app_shell_owner.dart'; // 사장님
 class RoleGate extends StatelessWidget {
   const RoleGate({super.key});
 
+  Widget _loading() {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final consentRepo = ConsentRepository();
+    final roleRepo = RoleRepository();
+
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, authSnap) {
         if (authSnap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return _loading();
         }
 
         final user = authSnap.data;
@@ -31,37 +40,54 @@ class RoleGate extends StatelessWidget {
 
         final uid = user.uid.trim();
         if (uid.isEmpty) {
-          // ✅ 극단 케이스 방어
           return const LoginScreen();
         }
 
-        final repo = RoleRepository();
+        // 2) 약관 동의 확인
+        return StreamBuilder<bool>(
+          stream: consentRepo.watchConsent(uid),
+          builder: (context, consentSnap) {
+            if (consentSnap.connectionState == ConnectionState.waiting) {
+              return _loading();
+            }
 
-        // 2) 로그인 됨 → 역할 스트림
-        return StreamBuilder<UserRole?>(
-          stream: repo.watchRole(uid),
-          builder: (context, roleSnap) {
-            if (roleSnap.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
+            final agreed = consentSnap.data ?? false;
+
+            // 3) 미동의 → 동의 화면
+            if (!agreed) {
+              return ConsentScreen(
+                onAgreed: () async {
+                  await consentRepo.setAgreed(uid);
+                },
               );
             }
 
-            final role = roleSnap.data;
+            // 4) 동의 완료 → 역할 확인
+            return StreamBuilder<UserRole?>(
+              stream: roleRepo.watchRole(uid),
+              builder: (context, roleSnap) {
+                if (roleSnap.connectionState == ConnectionState.waiting) {
+                  return _loading();
+                }
 
-            // 3) 저장된 역할 있음 → 바로 진입 (✅ 여기만이 진입 책임)
-            if (role != null) {
-              return role == UserRole.owner
-                  ? const OwnerAppShell()
-                  : const AppShell();
-            }
+                final role = roleSnap.data;
 
-            // 4) 역할 없음 → 선택 화면
-            return RoleSelectionScreen(
-              onPick: (UserRole picked) async {
-                // ✅ 네비게이션 금지(중복 전환 방지)
-                // setRole만 하면 watchRole이 변하고 RoleGate가 자동 진입함.
-                await repo.setRole(uid, picked);
+                // 5) 저장된 역할이 있으면 바로 진입
+                if (role != null) {
+                  return role == UserRole.owner
+                      ? const OwnerAppShell()
+                      : const AppShell();
+                }
+
+                // 6) 역할이 없으면 처음 1회만 선택
+                return RoleSelectionScreen(
+                  onPick: (UserRole picked) async {
+                    // ✅ 여기서 네비게이션 직접 하지 않음
+                    // 역할 저장만 하면 watchRole이 다시 emit되고
+                    // RoleGate가 자동으로 해당 쉘로 분기함
+                    await roleRepo.setRole(uid, picked);
+                  },
+                );
               },
             );
           },

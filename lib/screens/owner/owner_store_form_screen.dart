@@ -1,7 +1,7 @@
 // lib/screens/owner/owner_store_form_screen.dart
 import 'package:flutter/material.dart';
 import '../../common/paymoa_design.dart';
-import 'package:flutter/services.dart';
+import '../../common/common_pickers.dart' as cp;
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../models/store.dart';
@@ -45,12 +45,15 @@ class _FormCard extends StatelessWidget {
           if (label != null) ...[
             Row(
               children: [
-                Text(label!,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: _textTertiary,
-                        letterSpacing: 0.5)),
+                Text(
+                  label!,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _textTertiary,
+                    letterSpacing: 0.5,
+                  ),
+                ),
                 const Spacer(),
                 if (trailing != null) trailing!,
               ],
@@ -69,15 +72,18 @@ class _FormCard extends StatelessWidget {
 
 /* ── 접이식 카드 ── */
 class _OwnerSettingRow extends StatelessWidget {
-  const _OwnerSettingRow(
-      {required this.icon,
-      required this.label,
-      required this.value,
-      this.onTap});
+  const _OwnerSettingRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.onTap,
+  });
+
   final IconData icon;
   final String label;
   final String value;
   final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -85,23 +91,37 @@ class _OwnerSettingRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-        child: Row(children: [
-          Icon(icon, size: 18, color: const Color(0xFF9CA3AF)),
-          const SizedBox(width: 10),
-          Text(label,
-              style: const TextStyle(
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF9CA3AF)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: Color(0xFF6B7280))),
-          const Spacer(),
-          Text(value,
-              style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF111827))),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right, size: 18, color: Color(0xFFD1D5DB)),
-        ]),
+                  color: Color(0xFF111827),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFFD1D5DB)),
+          ],
+        ),
       ),
     );
   }
@@ -123,38 +143,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   final _storeName = TextEditingController();
   late final MoneyTextController _wage;
 
+  final _storeNameFocus = FocusNode();
+  final _wageFocus = FocusNode();
+
   // ── 색상
   Color _color = Pm.primary;
   String _colorHex = '#7C3AED';
-
-  static const _paletteHex = [
-    '#7C3AED',
-    '#3B82F6',
-    '#10B981',
-    '#F59E0B',
-    '#EF4444',
-    '#EC4899',
-    '#8B5CF6',
-    '#14B8A6',
-    '#F97316',
-    '#6366F1',
-    '#84CC16',
-    '#06B6D4',
-  ];
-  static const _paletteColors = [
-    Color(0xFF7C3AED),
-    Color(0xFF3B82F6),
-    Color(0xFF10B981),
-    Color(0xFFF59E0B),
-    Color(0xFFEF4444),
-    Color(0xFFEC4899),
-    Color(0xFF8B5CF6),
-    Color(0xFF14B8A6),
-    Color(0xFFF97316),
-    Color(0xFF6366F1),
-    Color(0xFF84CC16),
-    Color(0xFF06B6D4),
-  ];
 
   // ── 정책
   pol.TaxConfig _tax = pol.TaxConfig.none;
@@ -163,7 +157,6 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
 
   late PayrollPolicy _payrollPolicy;
   bool _saving = false;
-  bool _showPalette = false;
   bool _formattingWage = false;
 
   final _repo = FirebaseService();
@@ -227,17 +220,28 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   void dispose() {
     _storeName.dispose();
     _wage.dispose();
+    _storeNameFocus.dispose();
+    _wageFocus.dispose();
     super.dispose();
+  }
+
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
   }
 
   // ── 정책 시트
   Future<void> _openPolicy() async {
+    _dismissKeyboard();
+
     final r = await showPolicySheet(
       context: context,
       initialTax: _tax,
       initialIns: _ins,
       initialSurcharge: _surcharge,
+      showWeeklyToggles: false,
     );
+    if (!mounted) return;
+
     if (r != null) {
       setState(() {
         _tax = r.tax;
@@ -248,11 +252,15 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   }
 
   Future<void> _openPayrollPolicy() async {
+    _dismissKeyboard();
+
     final res = await showPayrollPolicySheet(
       context: context,
       initial: _payrollPolicy,
       role: PayrollViewerRole.owner,
     );
+    if (!mounted) return;
+
     if (res != null) {
       setState(() => _payrollPolicy = _normalizePolicies(res));
     }
@@ -278,27 +286,34 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   // ── submit
   Future<void> _submit() async {
     if (_saving) return;
+
+    _dismissKeyboard();
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final name = _storeName.text.trim();
     if (name.isEmpty) {
-      _snack('매장 이름을 적어주세요.');
+      showErrorDialog(context, '매장 이름을 적어주세요.');
       return;
     }
+
     final wage = _wage.valueInt;
     if (wage <= 0) {
-      _snack('시급을 입력해 주세요.');
+      showErrorDialog(context, '시급을 입력해 주세요.');
       return;
     }
 
     final preview = const PayrollEngine()
         .previewNext(policy: _payrollPolicy, count: 1)
         .first;
+
     final ok = await _confirmSummary(name: name, wage: wage, preview: preview);
+    if (!mounted) return;
     if (!ok) return;
 
     setState(() => _saving = true);
+
     try {
       if (_isEdit) {
         await _repo.updateStore(
@@ -325,21 +340,25 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
         policy: _policyToMap(),
       );
       if (!mounted) return;
+
       final code = store.storeCode;
       if (code == null || code.isEmpty) {
-        _snack('초대코드 생성 실패.');
+        showErrorDialog(context, '초대코드 생성에 실패했어요.');
         return;
       }
 
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) =>
-            OwnerStoreCodeScreen(storeName: store.name, storeCode: code),
-      ));
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              OwnerStoreCodeScreen(storeName: store.name, storeCode: code),
+        ),
+      );
       if (!mounted) return;
+
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      _snack('저장 실패: $e');
+      showErrorDialog(context, '저장에 실패했어요.\n잠시 후 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -352,11 +371,11 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   Map<String, dynamic> _policyToMap() => {
         'tax': {
           'enabled': _tax != pol.TaxConfig.none,
-          'value': _taxToPolicyValue(_tax)
+          'value': _taxToPolicyValue(_tax),
         },
         'insurance': {
           'enabled': _ins is! pol.InsuranceNone,
-          'value': _insToPolicyValue(_ins)
+          'value': _insToPolicyValue(_ins),
         },
         'surcharge': {
           'enabled': _anySurcharge(_surcharge),
@@ -378,8 +397,9 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   dynamic _taxToPolicyValue(pol.TaxConfig t) {
     if (t == pol.TaxConfig.biz33) return 'biz33';
     if (t == pol.TaxConfig.day66) return 'day66';
-    if (t is pol.TaxConfigCustomPercent)
+    if (t is pol.TaxConfigCustomPercent) {
       return {'kind': 'customPercent', 'percent': t.percent};
+    }
     return 'none';
   }
 
@@ -389,9 +409,15 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
     return 'none';
   }
 
-  int _legacyPayDay(PayrollPolicy p) => p.cycle == PayCycleType.monthly
-      ? (p.monthlyStartDay ?? 1).clamp(1, 31)
-      : 1;
+  int _legacyPayDay(PayrollPolicy p) {
+    // ✅ 실제 급여 지급일 = payRule.monthlyDay (예: 25일 지급)
+    // monthlyStartDay는 정산 시작일(예: 1일)이므로 급여일로 쓰면 안 됨
+    if (p.cycle == PayCycleType.monthly &&
+        p.payRule.type == PayDateRuleType.nextMonthlyDay) {
+      return (p.payRule.monthlyDay ?? 10).clamp(1, 31);
+    }
+    return 1;
+  }
 
   String _fmtYmd(DateTime d) =>
       '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
@@ -404,6 +430,7 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                 ? '한 달(1일~말일)'
                 : '매달 ${p.monthlyStartDay}일 시작')
             : '급여 방식';
+
     final payStr = () {
       switch (p.payRule.type) {
         case PayDateRuleType.nextMonthlyDay:
@@ -416,6 +443,7 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
           return '지정일 지급';
       }
     }();
+
     return '$type · $payStr';
   }
 
@@ -436,13 +464,18 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('취소')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_isEdit ? '수정' : '만들기',
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+            child: Text(
+              _isEdit ? '수정' : '만들기',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF111827),
+              ),
+            ),
           ),
         ],
       ),
@@ -486,14 +519,23 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new,
-              size: 18, color: _textPrimary),
-          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            size: 18,
+            color: _textPrimary,
+          ),
+          onPressed: () {
+            _dismissKeyboard();
+            Navigator.of(context).pop();
+          },
         ),
         title: Text(
           _isEdit ? '매장 수정' : '매장 만들기',
           style: const TextStyle(
-              fontWeight: FontWeight.w900, fontSize: 18, color: _textPrimary),
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+            color: _textPrimary,
+          ),
         ),
         centerTitle: true,
         actions: [
@@ -511,10 +553,10 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
         ],
       ),
       body: GestureDetector(
-        // 팔레트 외부 탭 → 닫기
-        onTap: _showPalette ? () => setState(() => _showPalette = false) : null,
         behavior: HitTestBehavior.translucent,
+        onTap: _dismissKeyboard,
         child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
           children: [
             // ── ① 색상 + 매장명
@@ -523,7 +565,21 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                 children: [
                   // 색상 도트
                   GestureDetector(
-                    onTap: () => setState(() => _showPalette = !_showPalette),
+                    onTap: () async {
+                      _dismissKeyboard();
+                      final picked = await cp.showColorPaletteDialog(
+                        context: context,
+                        initialHex: _colorHex,
+                      );
+                      if (!mounted) return;
+
+                      if (picked != null) {
+                        setState(() {
+                          _colorHex = picked;
+                          _color = cp.parseColor(picked);
+                        });
+                      }
+                    },
                     child: Container(
                       width: 52,
                       height: 52,
@@ -538,24 +594,34 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                           ),
                         ],
                       ),
-                      child: const Icon(Icons.palette_outlined,
-                          color: Colors.white, size: 22),
+                      child: const Icon(
+                        Icons.palette_outlined,
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: TextField(
                       controller: _storeName,
+                      focusNode: _storeNameFocus,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) {
+                        FocusScope.of(context).requestFocus(_wageFocus);
+                      },
                       style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: _textPrimary),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: _textPrimary,
+                      ),
                       decoration: InputDecoration(
                         hintText: '매장 이름',
                         hintStyle: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w400,
-                            color: Color(0xFFD1D5DB)),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w400,
+                          color: Color(0xFFD1D5DB),
+                        ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: UnderlineInputBorder(
@@ -571,64 +637,6 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
               ),
             ),
 
-            // 팔레트 (이름 카드 바로 아래)
-            if (_showPalette) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: List.generate(_paletteHex.length, (i) {
-                    final hex = _paletteHex[i];
-                    final c = _paletteColors[i];
-                    final selected = hex == _colorHex;
-                    return GestureDetector(
-                      onTap: () => setState(() {
-                        _colorHex = hex;
-                        _color = c;
-                        _showPalette = false;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: c,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: selected ? Colors.white : Colors.transparent,
-                            width: 3,
-                          ),
-                          boxShadow: selected
-                              ? [
-                                  BoxShadow(
-                                      color: c.withOpacity(0.5), blurRadius: 10)
-                                ]
-                              : [],
-                        ),
-                        child: selected
-                            ? const Icon(Icons.check,
-                                color: Colors.white, size: 20)
-                            : null,
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ],
-
             const SizedBox(height: 12),
 
             // ── ② 시급
@@ -640,9 +648,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                   Expanded(
                     child: TextField(
                       controller: _wage,
+                      focusNode: _wageFocus,
                       keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _dismissKeyboard(),
                       inputFormatters: [
-                        MoneyTextController.digitsOnlyFormatter
+                        MoneyTextController.digitsOnlyFormatter,
                       ],
                       textAlign: TextAlign.right,
                       style: const TextStyle(
@@ -654,9 +665,10 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                       decoration: const InputDecoration(
                         hintText: '0',
                         hintStyle: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFFE5E7EB)),
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFFE5E7EB),
+                        ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
@@ -667,11 +679,14 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  const Text('원',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF374151))),
+                  const Text(
+                    '원',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -703,6 +718,38 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                     value: _surchargeLabel(_surcharge),
                     onTap: _openPolicy,
                   ),
+                  const SizedBox(height: 8),
+                  const Divider(height: 1, color: Color(0xFFF0F0F5)),
+                  const SizedBox(height: 8),
+                  _OwnerToggleRow(
+                    icon: Icons.calendar_today_rounded,
+                    label: '주휴수당',
+                    desc: '주 15시간 이상 근무 시 1일치 급여 추가',
+                    value: _surcharge.weeklyHolidayEnabled,
+                    accent: _color,
+                    onChanged: (v) => setState(() {
+                      _surcharge =
+                          _surcharge.copyWith(weeklyHolidayEnabled: v);
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                  _OwnerToggleRow(
+                    icon: Icons.access_time_rounded,
+                    label: '주 40시간 초과 연장수당',
+                    desc: '한 주 40시간 넘으면 초과분 50% 추가',
+                    value: _surcharge.overtimeEnabled &&
+                        _surcharge.overtimeRule ==
+                            pol.OvertimeRule.weeklyOver40,
+                    accent: _color,
+                    onChanged: (v) => setState(() {
+                      _surcharge = _surcharge.copyWith(
+                        overtimeEnabled: v,
+                        overtimeRule: v
+                            ? pol.OvertimeRule.weeklyOver40
+                            : _surcharge.overtimeRule,
+                      );
+                    }),
+                  ),
                 ],
               ),
             ),
@@ -714,11 +761,14 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
               label: '급여 방식',
               trailing: TextButton(
                 onPressed: _openPayrollPolicy,
-                child: Text('설정',
-                    style: TextStyle(
-                        color: _color,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700)),
+                child: Text(
+                  '설정',
+                  style: TextStyle(
+                    color: _color,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,15 +776,19 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                   Text(
                     _payrollSummary(_payrollPolicy),
                     style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: _textPrimary),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: _textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     '이번 기간: ${_fmtYmd(preview.period.start)} ~ ${_fmtYmd(preview.period.end)}  '
                     '지급: ${_fmtYmd(preview.payDate)}',
-                    style: const TextStyle(fontSize: 14, color: _textTertiary),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _textTertiary,
+                    ),
                   ),
                 ],
               ),
@@ -751,14 +805,16 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                 style: FilledButton.styleFrom(
                   backgroundColor: _color,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
                 child: Text(
                   _saving ? '저장하는 중…' : (_isEdit ? '수정 완료' : '매장 만들고 초대코드 받기'),
                   style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                      color: Colors.white),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -788,6 +844,72 @@ String _commaFmt(int n) {
     if (left > 0 && left % 3 == 0) b.write(',');
   }
   return b.toString();
+}
+
+class _OwnerToggleRow extends StatelessWidget {
+  const _OwnerToggleRow({
+    required this.icon,
+    required this.label,
+    required this.desc,
+    required this.value,
+    required this.accent,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String label;
+  final String desc;
+  final bool value;
+  final Color accent;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: value ? accent.withOpacity(0.08) : const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: value ? accent : const Color(0xFF9CA3AF)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: value ? accent : const Color(0xFF374151),
+                  ),
+                ),
+                Text(
+                  desc,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                    color: value
+                        ? accent.withOpacity(0.7)
+                        : const Color(0xFF9CA3AF),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: accent,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String _formatMoneyText(String raw) {

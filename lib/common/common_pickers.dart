@@ -703,7 +703,7 @@ class _AlbaMultiDateDialogState extends State<_AlbaMultiDateDialog> {
     final theme = Theme.of(context);
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -971,7 +971,7 @@ class _SingleDateDialogState extends State<_SingleDateDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -1139,6 +1139,97 @@ Future<WorkTimeResult?> showWorkTimePicker(
       startMinute: startMinute,
       endHour24: endHour24,
       endMinute: endMinute,
+    ),
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * 색상 팔레트 Dialog
+ * -------------------------------------------------------------------------*/
+
+/// 색상 팔레트 Dialog 표시.
+/// 선택된 hex('#XXXXXX' 대문자) 반환, 취소·바깥탭 시 null 반환.
+Future<String?> showColorPaletteDialog({
+  required BuildContext context,
+  String initialHex = '#3B82F6',
+}) {
+  const colors = <String>[
+    '#EF4444',
+    '#F97316',
+    '#F59E0B',
+    '#EAB308',
+    '#84CC16',
+    '#22C55E',
+    '#10B981',
+    '#06B6D4',
+    '#3B82F6',
+    '#8B5CF6',
+    '#EC4899',
+    '#7C3AED',
+  ];
+
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('색상 선택',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              alignment: WrapAlignment.center,
+              children: colors.map((hex) {
+                final selected =
+                    hex.toUpperCase() == initialHex.toUpperCase();
+                final c = parseColor(hex);
+                return GestureDetector(
+                  onTap: () => Navigator.of(ctx).pop(hex.toUpperCase()),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c,
+                      shape: BoxShape.circle,
+                      border: selected
+                          ? Border.all(color: Colors.white, width: 3)
+                          : null,
+                      boxShadow: [
+                        BoxShadow(
+                          color: c.withOpacity(selected ? 0.6 : 0.25),
+                          blurRadius: selected ? 10 : 4,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: selected
+                        ? const Icon(Icons.check, color: Colors.white, size: 20)
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.of(ctx).pop(null),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF7C3AED),
+                ),
+                child: const Text('닫기',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }

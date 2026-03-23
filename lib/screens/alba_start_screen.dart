@@ -426,20 +426,20 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                         ),
                       ),
                       trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: AppWords.delete,
-                            icon: const Icon(Icons.delete_outline,
-                                color: PaymoaColors.error),
-                            onPressed: () => widget.onDelete(s.id),
-                          ),
-                          TextButton(
-                            onPressed: () => widget.onEdit(s.id),
-                            child: const Text(AppWords.edit),
-                          ),
-                        ],
-                      ),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: AppWords.delete,
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: PaymoaColors.error),
+                                  onPressed: () => widget.onDelete(s.id),
+                                ),
+                                TextButton(
+                                  onPressed: () => widget.onEdit(s.id),
+                                  child: const Text(AppWords.edit),
+                                ),
+                              ],
+                            ),
                     );
                   }).toList(),
                 ],
@@ -469,6 +469,8 @@ class AlbaStartScreen extends StatefulWidget {
     this.getInsurancePolicy,
     this.getSurchargePolicy,
     this.getSurchargeAt,
+    this.getTaxAt,
+    this.getInsuranceAt,
     this.getPayrollPolicy,
     this.getWageAt,
   });
@@ -499,6 +501,9 @@ class AlbaStartScreen extends StatefulWidget {
   /// ✅ 날짜별 가산정책 콜백 (정책 이력 반영)
   final pol.SurchargePolicy Function(DateTime)? Function(String albaId)?
       getSurchargeAt;
+  final pol.TaxConfig Function(DateTime)? Function(String albaId)? getTaxAt;
+  final pol.InsuranceConfig Function(DateTime)? Function(String albaId)?
+      getInsuranceAt;
   final PayrollPolicy? Function(String albaId)? getPayrollPolicy;
   // ✅ 날짜별 시급 조회 (policyHistory 기반)
   final int Function(String albaId, DateTime dateLocal)? getWageAt;
@@ -630,7 +635,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.failed}\n$e')),
+        const SnackBar(content: Text('오류가 발생했어요. 잠시 후 다시 시도해 주세요.')),
       );
     }
   }
@@ -917,11 +922,10 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppWords.failed}\n$e')),
+        const SnackBar(content: Text('오류가 발생했어요. 잠시 후 다시 시도해 주세요.')),
       );
     } finally {
-      if (!mounted) return;
-      setState(() => _joinSaving = false);
+      if (mounted) setState(() => _joinSaving = false);
     }
   }
 
@@ -1000,9 +1004,9 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                     );
                   },
                   onDelete: (scheduleId) async {
+                    final nav = Navigator.of(ctx);
                     await _safeDeleteSchedule(ctx, scheduleId);
-                    if (mounted && Navigator.of(ctx).canPop())
-                      Navigator.pop(ctx);
+                    if (mounted && nav.canPop()) nav.pop();
                   },
                 ),
               ),
@@ -1100,6 +1104,12 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
 
   pol.SurchargePolicy Function(DateTime)? _surchargeAtOf(String id) =>
       widget.getSurchargeAt?.call(id);
+
+  pol.TaxConfig Function(DateTime)? _taxAtOf(String id) =>
+      widget.getTaxAt?.call(id);
+
+  pol.InsuranceConfig Function(DateTime)? _insAtOf(String id) =>
+      widget.getInsuranceAt?.call(id);
 
   PayrollPolicy? _payrollOf(String id) => widget.getPayrollPolicy?.call(id);
 
@@ -1202,8 +1212,12 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     final payroll = _payrollOf(alba.id);
     final sur = _surOf(alba.id) ?? const pol.SurchargePolicy();
 
-    // ── ① 월 기준 ──────────────────────────────────
-    if (payroll == null || payroll.cycle == PayCycleType.monthly) {
+    // ── ① 달력 월(1일~말일) 기준 ──────────────────────
+    final isCalendarMonth = payroll == null ||
+        (payroll.cycle == PayCycleType.monthly &&
+            (payroll.monthlyStartDay ?? 1) == 1);
+
+    if (isCalendarMonth) {
       final monthSchedules = widget.schedules
           .where((s) =>
               s.albaId == alba.id &&
@@ -1212,12 +1226,14 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
           .toList();
       if (monthSchedules.isEmpty) return 0;
       final surchargeAt = _surchargeAtOf(alba.id);
+      final monthStart = DateTime(ymDate.year, ymDate.month, 1);
       final result = computeMonthlySummary(
         alba: alba,
         ymDate: ymDate,
         schedules: monthSchedules,
-        tax: _taxOf(alba.id),
-        insurance: _insOf(alba.id),
+        tax: _taxAtOf(alba.id)?.call(monthStart) ?? _taxOf(alba.id),
+        insurance:
+            _insAtOf(alba.id)?.call(monthStart) ?? _insOf(alba.id),
         policy: sur,
         surchargeAt: surchargeAt,
         wageAt: _wageAtFn,
@@ -1225,7 +1241,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
       return result.net;
     }
 
-    // ── ② 급여 기간 기준 (주·2주·커스텀) ────────────
+    // ── ② 급여 기간 기준 (앵커 월·주·2주·커스텀) ────────────
     final surchargeAt2 = _surchargeAtOf(alba.id);
     final summary = const PayrollEngine().summaryForDate(
       policy: payroll,
@@ -1237,6 +1253,8 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
       surchargePolicy: sur,
       wageAt: _wageAtFn,
       surchargeAt: surchargeAt2,
+      taxAt: _taxAtOf(alba.id),
+      insuranceAt: _insAtOf(alba.id),
       anyDateInPeriod: ymDate,
     );
     return summary.net;
@@ -1429,9 +1447,9 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 4),
-                                  // 시급
+                                  // 시급 (날짜 기반: 사장님이 설정한 적용일 반영)
                                   Text(
-                                    '시급 ${_won(alba.hourlyWage)}',
+                                    '시급 ${_won(widget.getWageAt?.call(alba.id, DateTime.now()) ?? alba.hourlyWage)}',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600,
@@ -1508,33 +1526,16 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                                     ),
                                   );
                                 }(),
-                                // ── 지난달 / 이번달 예상 급여
-                                () {
-                                  final prevDate = DateTime(
-                                      _focusedDay.year,
-                                      _focusedDay.month - 1,
-                                      1);
-                                  final prevNet = _calcPeriodNetForMonth(
-                                      alba, prevDate);
-                                  final curNet = _calcPeriodNet(alba);
-                                  return Column(
-                                    children: [
-                                      _kv(
-                                        '지난 ${prevDate.month}월 예상 수령',
-                                        _won(prevNet),
-                                      ),
-                                      _kv(
-                                        '이번 ${_focusedDay.month}월 예상 수령',
-                                        _won(curNet),
-                                      ),
-                                    ],
-                                  );
-                                }(),
+                                // ── 이번달 예상 급여
+                                _kv(
+                                  '이번 ${_focusedDay.month}월 예상 수령',
+                                  _won(_calcPeriodNet(alba)),
+                                ),
                                 const SizedBox(height: 12),
                                 // ✅ 매장 조인 알바 vs 개인 알바 버튼 분기
                                 if (alba.storeId.isNotEmpty) ...[
                                   // ─────────────────────────────────────
-                                  // 📦 매장 조인 알바: 시급/정책은 사장님 관리
+                                  // 📦 매장 조인: 시급/정책은 사장님 관리
                                   // 버튼: 탈퇴 | 근무 추가
                                   // ─────────────────────────────────────
                                   Container(
@@ -1550,7 +1551,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                                         Icon(Icons.storefront_outlined,
                                             size: 13,
                                             color: PaymoaColors.primary
-                                                .withOpacity(0.7)),
+                                                .withValues(alpha: 0.7)),
                                         const SizedBox(width: 5),
                                         const Text(
                                           '시급·정책은 사장님이 설정해요',

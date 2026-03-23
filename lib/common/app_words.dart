@@ -183,7 +183,7 @@ class AppWords {
   static const String workConflictTitle = '겹치는 알바가 있습니다';
   static const String workConflictBodyPrefix = '';
   static const String workConflictBodySuffix =
-      ' 에 같은 시간대의 다른 근무가 있어 저장할 수 없어요.\n시간을 조정한 뒤 다시 시도해 주세요.';
+      '에 같은 시간대의 다른 근무가 있어 저장할 수 없어요.\n시간을 조정한 뒤 다시 시도해 주세요.';
 
   static const String workDeleteConfirmTitle = '이 근무를 삭제할까요?';
   static const String workDeleteConfirmBody = '삭제 후 되돌릴 수 없습니다.';

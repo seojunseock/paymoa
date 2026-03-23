@@ -1,0 +1,237 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════════════════════════════════
+    // 공통 헬퍼 함수
+    // ════════════════════════════════════════
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    // 경로의 userId가 현재 로그인 사용자와 일치하는지
+    function isOwner(ownerUid) {
+      return signedIn() && uid() == ownerUid;
+    }
+    // 문서의 ownerUid 필드가 현재 사용자와 일치하는지
+    function isStoreOwnerOf(data) {
+      return signedIn()
+        && data.keys().hasAll(['ownerUid'])
+        && data.ownerUid == uid();
+    }
+
+    // ────────────────────────────────────────
+    // 조인된 매장 스케줄: 알바생이 시급·정책 변경 불가
+    // (날짜 변경 시 overrideHourlyWage 재계산은 허용)
+    // ────────────────────────────────────────
+    function wageAndPolicyUnchanged(existing, incoming) {
+      return (!incoming.keys().hasAny(['hourlyWage'])
+                || incoming.hourlyWage == existing.hourlyWage)
+          && (!incoming.keys().hasAny(['defaultHourlyWage'])
+                || incoming.defaultHourlyWage == existing.defaultHourlyWage)
+          && (!incoming.keys().hasAny(['payDay'])
+                || incoming.payDay == existing.payDay)
+          && (!incoming.keys().hasAny(['inheritFromStore'])
+                || incoming.inheritFromStore == existing.inheritFromStore)
+          // 날짜가 바뀌면 overrideHourlyWage 재계산 허용, 그 외엔 동결
+          && (!incoming.keys().hasAny(['overrideHourlyWage'])
+                || incoming.overrideHourlyWage == existing.overrideHourlyWage
+                || existing.year  != incoming.get('year',  existing.year)
+                || existing.month != incoming.get('month', existing.month)
+                || existing.day   != incoming.get('day',   existing.day))
+          && !incoming.keys().hasAny([
+                'policy', 'payrollPolicy', 'tax', 'insurance',
+                'surcharge', 'ownerSetting', 'policyHistory'
+             ]);
+    }
+
+    // ────────────────────────────────────────
+    // 조인 문서: 알바생이 급여·정책·상태 핵심 필드 변경 불가
+    // (ownerUid 변경도 차단)
+    // ────────────────────────────────────────
+    function joinFieldsUnchanged(existing, incoming) {
+      return (!incoming.keys().hasAny(['status'])
+                || incoming.status == existing.status)
+          && (!incoming.keys().hasAny(['hourlyWage'])
+                || incoming.hourlyWage == existing.hourlyWage)
+          && (!incoming.keys().hasAny(['defaultHourlyWage'])
+                || incoming.defaultHourlyWage == existing.defaultHourlyWage)
+          && (!incoming.keys().hasAny(['payDay'])
+                || incoming.payDay == existing.payDay)
+          && (!incoming.keys().hasAny(['inheritFromStore'])
+                || incoming.inheritFromStore == existing.inheritFromStore)
+          && !incoming.keys().hasAny([
+                'policy', 'payrollPolicy', 'tax', 'insurance',
+                'surcharge', 'ownerSetting', 'policyHistory', 'ownerUid'
+             ]);
+    }
+
+    // ════════════════════════════════════════
+    // /users/{userId}
+    // ════════════════════════════════════════
+    match /users/{userId} {
+      allow read, create: if signedIn() && uid() == userId;
+      // consent 필드만 본인이 업데이트 가능 (동의 기록 갱신)
+      allow update: if signedIn()
+        && uid() == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consent']);
+      allow delete: if false;
+
+      // ── storeJoins (조인된 매장) ─────────────────────────
+      // ⚠️ 알바생은 시급·정책·status 변경 불가 (joinFieldsUnchanged 적용)
+      // 개인 알바(myAlbas)와 달리 사장님이 통제하는 필드는 동결
+      match /storeJoins/{joinId} {
+        // 본인 조인 문서 읽기
+        allow read: if signedIn() && uid() == userId;
+        // 사장님이 자기 매장 알바의 조인 문서 읽기 (정책 조회)
+        allow read: if signedIn()
+          && resource != null
+          && resource.data.keys().hasAll(['ownerUid'])
+          && resource.data.ownerUid == uid();
+
+        // 본인 경로에 조인 생성
+        allow create: if signedIn() && uid() == userId;
+        // 사장님이 알바 경로에 조인 문서 생성 (defaults 전파 등)
+        allow create: if signedIn()
+          && joinId.matches(uid() + '_.*')
+          && request.resource.data.keys().hasAll(['ownerUid'])
+          && request.resource.data.ownerUid == uid();
+
+        // 알바생 본인: 시급·정책·status 동결 조건으로만 수정 가능
+        allow update: if signedIn()
+          && uid() == userId
+          && resource != null
+          && joinFieldsUnchanged(resource.data, request.resource.data);
+        // 알바생 탈퇴: status=ended 설정 + 제한된 필드만 허용
+        allow update: if signedIn()
+          && uid() == userId
+          && resource != null
+          && request.resource.data.status == 'ended'
+          && resource.data.get('status', '') != 'ended'
+          && request.resource.data.diff(resource.data)
+               .affectedKeys()
+               .hasOnly(['status', 'updatedAt', 'endedAt', 'endedAtLocal', 'endedReason']);
+        // 사장님: 자기 매장 알바 조인 문서 제한 없이 수정 (시급·이력 전파)
+        allow update: if signedIn()
+          && resource != null
+          && isStoreOwnerOf(resource.data);
+
+        allow delete: if false;
+      }
+
+      // ── mySchedules (개인 스케줄) ────────────────────────
+      // 본인만 전체 제어 — 사장님도 접근 불가
+      match /mySchedules/{scheduleId} {
+        allow read, create, update, delete: if signedIn() && uid() == userId;
+      }
+
+      // ── myAlbas (개인 알바) ──────────────────────────────
+      // 개인이 직접 만든 알바: 시급·정책 포함 모든 필드 자유롭게 수정 가능
+      // (조인된 매장 알바와 달리 제한 없음)
+      match /myAlbas/{albaId} {
+        allow read, create, update, delete: if signedIn() && uid() == userId;
+      }
+
+      // ── hiddenJoinSchedules ──────────────────────────────
+      match /hiddenJoinSchedules/{scheduleId} {
+        allow read, create, update, delete: if signedIn() && uid() == userId;
+      }
+
+      // ── stores (사장님 매장) ─────────────────────────────
+      // 사장님은 자신의 매장(/users/{본인uid}/stores/...)만 접근 가능
+      // 다른 사장님 매장, 알바생 개인 스케줄 접근 불가 (경로 자체로 차단)
+      match /stores/{storeId} {
+        allow read, create, update, delete: if isOwner(userId);
+
+        // ── workers ─────────────────────────────────────────
+        match /workers/{workerUid} {
+          // 사장님만 전체 읽기
+          allow read: if isOwner(userId);
+          // 알바생 자가 가입: 시급·정책 필드 없이만 생성 가능
+          allow create: if signedIn()
+            && uid() == workerUid
+            && !request.resource.data.keys().hasAny([
+                'hourlyWage', 'defaultHourlyWage', 'policy', 'payrollPolicy',
+                'tax', 'insurance', 'surcharge', 'policyHistory', 'policyOverride'
+               ]);
+          // 시급·정책 설정은 사장님만
+          allow update: if isOwner(userId);
+          // ✅ 알바생 자가 탈퇴: status=ended + 제한된 필드만 허용
+          allow update: if signedIn()
+            && uid() == workerUid
+            && resource != null
+            && request.resource.data.status == 'ended'
+            && resource.data.get('status', '') != 'ended'
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys()
+                 .hasOnly(['status', 'updatedAt', 'endedAt', 'endedAtLocal', 'endedReason']);
+          // ✅ 사장님 완전삭제 허용
+          allow delete: if isOwner(userId);
+        }
+
+        // ── schedules ────────────────────────────────────────
+        // 사장님: 자신의 매장 스케줄만 읽기 (다른 매장·개인 스케줄 접근 불가)
+        // 알바생: 자신의 workerUid가 있는 스케줄만 읽기
+        match /schedules/{scheduleId} {
+          allow read: if signedIn() && (
+            isOwner(userId) ||
+            (resource != null && resource.data.workerUid == uid())
+          );
+
+          // 알바생이 매장에 근무 추가: 본인 workerUid, 시급·정책 필드 없이
+          allow create: if signedIn()
+            && uid() != userId
+            && request.resource.data.workerUid == uid()
+            && !request.resource.data.keys().hasAny([
+                'hourlyWage', 'defaultHourlyWage', 'policy', 'payrollPolicy',
+                'tax', 'insurance', 'surcharge', 'ownerSetting', 'policyHistory'
+               ]);
+
+          // 사장님: 제한 없음
+          // 알바생: 본인 스케줄 + 시급·정책 변경 불가
+          allow update: if isOwner(userId)
+            || (signedIn()
+              && uid() != userId
+              && resource.data.workerUid == uid()
+              && request.resource.data.workerUid == uid()
+              && wageAndPolicyUnchanged(resource.data, request.resource.data));
+
+          // 사장님 또는 본인 스케줄 삭제
+          allow delete: if signedIn() && (
+            isOwner(userId) ||
+            (resource != null && resource.data.workerUid == uid())
+          );
+        }
+      }
+    }
+
+    // ════════════════════════════════════════
+    // 컬렉션 그룹: 알바생 본인 매장 스케줄 읽기
+    // workerUid == uid() 인 스케줄만 — 타인 스케줄 접근 불가
+    // (개인 스케줄은 mySchedules에서 별도 관리)
+    // ════════════════════════════════════════
+    match /{path=**}/schedules/{scheduleId} {
+      allow read: if signedIn()
+        && resource != null
+        && resource.data.workerUid == uid();
+    }
+
+    // ════════════════════════════════════════
+    // /storeJoinCodes
+    // ════════════════════════════════════════
+    match /storeJoinCodes/{code} {
+      allow get:    if signedIn();
+      allow list:   if false;
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == uid();
+      allow update: if signedIn()
+        && resource.data.ownerUid == uid()
+        && request.resource.data.ownerUid == uid();
+      allow delete: if signedIn()
+        && resource.data.ownerUid == uid();
+    }
+  }
+}

@@ -18,6 +18,7 @@ import '../policies/policies.dart' as pol;
 import '../policies/policy_mapper.dart' as pm;
 import '../payroll/payroll.dart';
 import '../payroll/payroll_policy_mapper.dart' as ppm;
+import '../payroll/payroll_document_service.dart';
 
 /// ✅ ScheduleRepository가 쓰는 "활성 조인 경로"
 class ActiveJoinPath {
@@ -55,8 +56,14 @@ class FirebaseService {
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
   /// ✅ 날짜 키 생성 (정렬용)
   int _dateKey(int y, int m, int d) => (y * 10000 + m * 100 + d);
+
+  /// ✅ 날짜 문자열 생성 (policyHistory effectiveFrom용) 'YYYY-MM-DD'
+  String _ymdStr(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   /// ✅ 최근 키 계산 (정렬용)
   DateTime _recentKey(Map<String, dynamic> m) {
@@ -67,6 +74,75 @@ class FirebaseService {
     if (c.millisecondsSinceEpoch != 0) return c;
 
     return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  bool _hasPolicyHistory(dynamic raw) => raw is List && raw.isNotEmpty;
+
+  Map<String, dynamic> _mergeHistoryEntryMaps(
+    Map<String, dynamic> base,
+    Map<String, dynamic> extra,
+  ) {
+    final out = <String, dynamic>{...base};
+    extra.forEach((key, value) {
+      if (key == 'effectiveFrom') {
+        out[key] = value;
+        return;
+      }
+      if (value is Map &&
+          out[key] is Map &&
+          value.isNotEmpty &&
+          (out[key] as Map).isNotEmpty) {
+        out[key] = {
+          ...(out[key] as Map).cast<String, dynamic>(),
+          ...value.cast<String, dynamic>(),
+        };
+      } else {
+        out[key] = value;
+      }
+    });
+    return out;
+  }
+
+  List<Map<String, dynamic>> _mergeHistoryEntriesByEffectiveFrom(
+    List<Map<String, dynamic>> entries,
+  ) {
+    final merged = <String, Map<String, dynamic>>{};
+    final order = <String>[];
+
+    for (final raw in entries) {
+      final e = Map<String, dynamic>.from(raw);
+      final effectiveFrom = (e['effectiveFrom'] ?? '').toString().trim();
+      if (effectiveFrom.isEmpty) continue;
+
+      if (!merged.containsKey(effectiveFrom)) {
+        merged[effectiveFrom] = e;
+        order.add(effectiveFrom);
+      } else {
+        merged[effectiveFrom] =
+            _mergeHistoryEntryMaps(merged[effectiveFrom]!, e);
+      }
+    }
+
+    return order.map((k) => merged[k]!).toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> _buildHistoryEntries({
+    required dynamic existingHistoryRaw,
+    Map<String, dynamic>? baseline,
+    Map<String, dynamic>? changed,
+  }) {
+    final out = <Map<String, dynamic>>[];
+
+    final hasExisting = _hasPolicyHistory(existingHistoryRaw);
+    if (!hasExisting && baseline != null && baseline.isNotEmpty) {
+      out.add(Map<String, dynamic>.from(baseline));
+    }
+
+    if (changed != null && changed.isNotEmpty) {
+      out.add(Map<String, dynamic>.from(changed));
+    }
+
+    return _mergeHistoryEntriesByEffectiveFrom(out);
   }
 
   // ═══════════════════════════════════════════════
@@ -288,17 +364,46 @@ class FirebaseService {
       }
     }
 
+    final effectiveDate = _dateOnly(DateTime.now());
+    final effectiveDateStr = _ymdStr(effectiveDate);
+
     // ✅ 매장 정책 변경 이력 저장 (매장 doc에도)
     if (policy != null) {
-      final today = DateTime.now();
-      final todayStr = _dateKey(today.year, today.month, today.day);
-      final histEntry = {...policy, 'effectiveFrom': todayStr};
-      await storeDoc.set(
-        {
-          'policyHistory': FieldValue.arrayUnion([histEntry])
+      Map<String, dynamic>? baseline;
+      final existingStorePH = current['policyHistory'];
+      if (!_hasPolicyHistory(existingStorePH)) {
+        final oldPolicy = current['policy'];
+        if (oldPolicy is Map) {
+          baseline = {
+            ...oldPolicy.cast<String, dynamic>(),
+            'effectiveFrom': '1970-01-01',
+          };
+        }
+      }
+
+      final histEntries = _buildHistoryEntries(
+        existingHistoryRaw: existingStorePH,
+        baseline: baseline,
+        changed: {
+          ...policy,
+          'effectiveFrom': effectiveDateStr,
         },
-        SetOptions(merge: true),
       );
+
+      if (histEntries.isNotEmpty) {
+        final existingList = (existingStorePH is List)
+            ? existingStorePH
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList()
+            : <Map<String, dynamic>>[];
+        final fullHistory = _mergeHistoryEntriesByEffectiveFrom(
+            [...existingList, ...histEntries]);
+        await storeDoc.set(
+          {'policyHistory': fullHistory},
+          SetOptions(merge: true),
+        );
+      }
     }
 
     // ✅ inheritFromStore=true 인 알바생 storeJoins 즉시 전파
@@ -310,7 +415,9 @@ class FirebaseService {
       defaultHourlyWage: defaultHourlyWage,
       payDay: payDay,
       policy: policy,
+      colorHex: colorHex,
       previousWage: previousWage,
+      effectiveFrom: effectiveDate,
     );
   }
 
@@ -322,15 +429,20 @@ class FirebaseService {
     int? defaultHourlyWage,
     int? payDay,
     Map<String, dynamic>? policy,
+    String? colorHex, // ✅ 매장 색상 전파
     int? previousWage, // ✅ 변경 전 시급 (과거 스케줄 고정용)
     DateTime? effectiveFrom, // ✅ 실제 적용 시작일 (null=오늘)
   }) {
-    if (defaultHourlyWage == null && payDay == null && policy == null) return;
+    if (defaultHourlyWage == null &&
+        payDay == null &&
+        policy == null &&
+        colorHex == null) {
+      return;
+    }
 
     Future.microtask(() async {
       try {
-        final today = DateTime.now();
-        final todayDate = DateTime(today.year, today.month, today.day);
+        final baseDate = _dateOnly(effectiveFrom ?? DateTime.now());
 
         // ① 이 매장 workers 목록 가져오기
         final workers =
@@ -349,13 +461,12 @@ class FirebaseService {
           final workerUid = workerDoc.id;
 
           try {
-            // ✅ 시급이 바뀐 경우: 오늘 이전 스케줄에 기존 시급 고정
-            // (오늘부터 새 시급 적용이므로 오늘 이전 = 기존 시급)
+            // ✅ 시급이 바뀐 경우: 기준일 이전 스케줄에 기존 시급 고정
             if (defaultHourlyWage != null &&
                 previousWage != null &&
                 defaultHourlyWage != previousWage) {
               final untilKey =
-                  _dateKey(todayDate.year, todayDate.month, todayDate.day);
+                  _dateKey(baseDate.year, baseDate.month, baseDate.day);
               final pastSnap = await _storeSchedulesRef(
                 ownerUid: ownerUid,
                 storeId: storeId,
@@ -363,7 +474,7 @@ class FirebaseService {
                   .where('workerUid', isEqualTo: workerUid)
                   .where('dateKey', isLessThan: untilKey)
                   .get();
-              // ✅ [BUG FIX] isNull 필터 → 메모리 필터로 대체 (복합 인덱스 불필요)
+
               final pastDocs = pastSnap.docs
                   .where((d) => d.data()['overrideHourlyWage'] == null)
                   .toList();
@@ -376,12 +487,13 @@ class FirebaseService {
                   final b = _db.batch();
                   for (final d in chunk) {
                     b.set(
-                        d.reference,
-                        {
-                          'overrideHourlyWage': previousWage,
-                          'updatedAt': FieldValue.serverTimestamp(),
-                        },
-                        SetOptions(merge: true));
+                      d.reference,
+                      {
+                        'overrideHourlyWage': previousWage,
+                        'updatedAt': FieldValue.serverTimestamp(),
+                      },
+                      SetOptions(merge: true),
+                    );
                   }
                   await b.commit();
                 }
@@ -389,9 +501,9 @@ class FirebaseService {
                     '[propagate] ✓ $workerUid 과거 스케줄 시급 고정 (${previousWage}원)');
               }
 
-              // ✅ 오늘 이후 스케줄에 새 시급 적용
+              // ✅ 기준일 포함 이후 스케줄에 새 시급 적용
               final futureKey =
-                  _dateKey(todayDate.year, todayDate.month, todayDate.day);
+                  _dateKey(baseDate.year, baseDate.month, baseDate.day);
               final futureSnap = await _storeSchedulesRef(
                 ownerUid: ownerUid,
                 storeId: storeId,
@@ -408,22 +520,22 @@ class FirebaseService {
                   final b = _db.batch();
                   for (final d in chunk) {
                     b.set(
-                        d.reference,
-                        {
-                          'overrideHourlyWage': defaultHourlyWage,
-                          'updatedAt': FieldValue.serverTimestamp(),
-                        },
-                        SetOptions(merge: true));
+                      d.reference,
+                      {
+                        'overrideHourlyWage': defaultHourlyWage,
+                        'updatedAt': FieldValue.serverTimestamp(),
+                      },
+                      SetOptions(merge: true),
+                    );
                   }
                   await b.commit();
                 }
                 debugPrint(
-                    '[propagate] ✓ $workerUid 오늘 이후 스케줄 새 시급 적용 (${defaultHourlyWage}원)');
+                    '[propagate] ✓ $workerUid 기준일 이후 스케줄 새 시급 적용 (${defaultHourlyWage}원)');
               }
             }
 
             // ② 알바생 storeJoins 업데이트 (기존 doc ID 그대로 사용)
-            // ✅ 쿼리로 기존 문서 찾기 (구 자동ID 포함)
             final joinRef = await _resolveStoreJoinRef(
               workerUid: workerUid,
               ownerUid: ownerUid,
@@ -432,7 +544,6 @@ class FirebaseService {
             final joinSnap = await joinRef.get();
             if (!joinSnap.exists) continue;
 
-            // ✅ ownerSetting도 함께 업데이트 → 알바 앱 즉시 반영
             final ownerSettingUpdate = <String, dynamic>{
               if (defaultHourlyWage != null) 'hourlyWage': defaultHourlyWage,
               if (payDay != null) 'payDay': payDay,
@@ -440,7 +551,7 @@ class FirebaseService {
               'updatedAt': FieldValue.serverTimestamp(),
             };
             final joinUpdates = <String, dynamic>{
-              'ownerUid': ownerUid, // ✅ Firestore rules 사장님 권한 검증용
+              'ownerUid': ownerUid,
               'storeId': storeId,
               if (defaultHourlyWage != null) ...{
                 'hourlyWage': defaultHourlyWage,
@@ -448,29 +559,58 @@ class FirebaseService {
               },
               if (payDay != null) 'payDay': payDay,
               if (policy != null) 'policy': policy,
+              if (colorHex != null) 'colorHex': colorHex,
               'ownerSetting': ownerSettingUpdate,
               'updatedAt': FieldValue.serverTimestamp(),
             };
 
-            // ✅ 정책·시급 변경 이력 전파
-            // policy 또는 defaultHourlyWage 중 하나라도 있으면 이력 생성
             if (policy != null || defaultHourlyWage != null) {
-              final effectiveDate = effectiveFrom ?? DateTime.now();
-              final effectiveDateStr = _dateKey(
-                  effectiveDate.year, effectiveDate.month, effectiveDate.day);
-              final histEntry = {
-                if (policy != null) ...policy,
-                if (defaultHourlyWage != null) 'hourlyWage': defaultHourlyWage,
-                if (previousWage != null) 'previousHourlyWage': previousWage,
-                'effectiveFrom': effectiveDateStr,
-              };
-              await joinRef.set(
-                {
-                  'policyHistory': FieldValue.arrayUnion([histEntry])
+              final effectiveDateOnly =
+                  _dateOnly(effectiveFrom ?? DateTime.now());
+              final effectiveDateStr = _ymdStr(effectiveDateOnly);
+
+              Map<String, dynamic>? baseline;
+              final joinData = joinSnap.data() ?? {};
+              final existingJoinPH = joinData['policyHistory'];
+              if (!_hasPolicyHistory(existingJoinPH)) {
+                final oldPolicy = joinData['policy'];
+                if (oldPolicy is Map) {
+                  baseline = {
+                    ...oldPolicy.cast<String, dynamic>(),
+                    if (previousWage != null) 'hourlyWage': previousWage,
+                    'effectiveFrom': '1970-01-01',
+                  };
+                }
+              }
+
+              final histEntries = _buildHistoryEntries(
+                existingHistoryRaw: joinData['policyHistory'],
+                baseline: baseline,
+                changed: {
+                  if (policy != null) ...policy,
+                  if (defaultHourlyWage != null)
+                    'hourlyWage': defaultHourlyWage,
+                  if (previousWage != null) 'previousHourlyWage': previousWage,
+                  'effectiveFrom': effectiveDateStr,
                 },
-                SetOptions(merge: true),
               );
+
+              if (histEntries.isNotEmpty) {
+                final existingList = (existingJoinPH is List)
+                    ? existingJoinPH
+                        .whereType<Map>()
+                        .map((e) => Map<String, dynamic>.from(e as Map))
+                        .toList()
+                    : <Map<String, dynamic>>[];
+                final fullHistory = _mergeHistoryEntriesByEffectiveFrom(
+                    [...existingList, ...histEntries]);
+                await joinRef.set(
+                  {'policyHistory': fullHistory},
+                  SetOptions(merge: true),
+                );
+              }
             }
+
             await joinRef.set(joinUpdates, SetOptions(merge: true));
             debugPrint('[propagate] ✓ ${workerUid} storeJoins 업데이트');
           } catch (e) {
@@ -494,16 +634,13 @@ class FirebaseService {
     if (id.isEmpty) throw StateError('uid empty');
     if (sid.isEmpty) throw StateError('storeId empty');
 
-    // ① 매장 doc 삭제 (항상 가능 - 본인 데이터)
     await _storesRef(id).doc(sid).delete();
 
-    // ② 초대 코드 삭제 (별도 처리 - 권한 규칙 필요)
     final code = storeCode?.trim();
     if (code != null && code.isNotEmpty) {
       try {
         await _joinCodesRef.doc(code).delete();
       } catch (e) {
-        // storeJoinCodes 삭제 권한 없으면 무효화만
         try {
           await _joinCodesRef.doc(code).set({
             'deleted': true,
@@ -515,7 +652,6 @@ class FirebaseService {
       }
     }
 
-    // ② workers 서브컬렉션 삭제 (비동기, 실패해도 계속)
     try {
       final workers = await _workersRef(ownerUid: id, storeId: sid).get();
       if (workers.docs.isNotEmpty) {
@@ -571,8 +707,6 @@ class FirebaseService {
 
   /// ✅ 중복 없는 초대 코드 생성
   Future<String> _generateUniqueStoreCode() async {
-    // 4자리, 대소문자 구분 / 혼동 문자 제외(0·O·o, 1·I·l)
-    // 소문자24 + 대문자24 + 숫자8 = 56자 → 56^4 ≈ 987만 가지
     const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
     final r = Random.secure();
 
@@ -624,112 +758,138 @@ class FirebaseService {
     String? displayName,
     required bool inheritFromStore,
     int? hourlyWage,
-    int? previousHourlyWage, // ✅ 변경 전 시급 (이력 저장용)
+    int? previousHourlyWage,
     int? payDay,
     Map<String, dynamic>? policyOverride,
-    DateTime? effectiveFrom, // ✅ 시급 몇일부터 적용 (null = 즉시)
-    DateTime? policyEffectiveFrom, // ✅ 가산정책 몇일부터 적용 (null = 오늘)
+    DateTime? effectiveFrom,
+    DateTime? policyEffectiveFrom,
+    Map<String, dynamic>? previousPolicyOverride,
   }) async {
     final nowServer = FieldValue.serverTimestamp();
 
-    final today = DateTime.now();
+    final now = DateTime.now();
+    final todayDate = DateTime(now.year, now.month, now.day);
+
     String toYmd(DateTime d) =>
         '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    // 정책 적용일: 지정되면 그날, 없으면 오늘
-    final policyDate = policyEffectiveFrom ?? today;
-    final policyDateStr = toYmd(policyDate);
 
-    // 시급 적용일: effectiveFrom이 지정되면 그날, 없으면 오늘
-    final wageDate = effectiveFrom ?? today;
+    final wageDate = effectiveFrom == null
+        ? todayDate
+        : DateTime(
+            effectiveFrom.year,
+            effectiveFrom.month,
+            effectiveFrom.day,
+          );
     final wageDateStr = toYmd(wageDate);
 
-    // ✅ 시급·정책 이력을 적용일 기준으로 분리 저장
-    // 시급만 변경: wageDateStr 기준 항목
-    // 정책만 변경: policyDateStr 기준 항목
-    // 둘 다 같은 날: 하나의 항목으로 합침
+    final policyDate = policyEffectiveFrom == null
+        ? todayDate
+        : DateTime(
+            policyEffectiveFrom.year,
+            policyEffectiveFrom.month,
+            policyEffectiveFrom.day,
+          );
+    final policyDateStr = toYmd(policyDate);
 
-    // 시급/정책 적용일이 같으면 하나로, 다르면 각각
-    // ✅ 핵심: 시급 변경 시 이전 시급을 "1970-01-01" 초기 밴드로 명시 저장
-    // → 기준일 이전 날짜 근무 추가 시 항상 이전 시급이 정확히 반환됨
-    // 정책도 동일하게 기준일 밴드로 저장
-    final histEntries = <Map<String, dynamic>>[];
+    final wageIsNow = !wageDate.isAfter(todayDate);
+    final policyIsNow = !policyDate.isAfter(todayDate);
 
-    if (hourlyWage != null && previousHourlyWage != null) {
-      // ✅ 시급 변경: 새 시급 밴드만 추가
-      // 1970-01-01 앵커는 최초 등록 시 이미 설정되어 있으므로 중복 추가 금지
-      // (arrayUnion이 다른 hourlyWage 값이면 별도 항목으로 추가하기 때문)
-      histEntries.add({'hourlyWage': hourlyWage, 'effectiveFrom': wageDateStr});
-    } else if (hourlyWage != null) {
-      // 최초 등록 (이전 시급 없음)
-      histEntries
-          .add({'hourlyWage': hourlyWage, 'effectiveFrom': '1970-01-01'});
+    // 기존 policyHistory 읽기 (worker doc)
+    final workerDocRef = _workerDoc(
+        ownerUid: ownerUid, storeId: storeId, workerUid: workerUid);
+    final workerSnap = await workerDocRef.get();
+    final existingWorkerHistoryRaw =
+        (workerSnap.data() ?? <String, dynamic>{})['policyHistory'];
+
+    Map<String, dynamic>? baseline;
+    if (!_hasPolicyHistory(existingWorkerHistoryRaw)) {
+      if (hourlyWage != null && previousHourlyWage != null) {
+        baseline = {
+          if (previousPolicyOverride != null) ...previousPolicyOverride,
+          'hourlyWage': previousHourlyWage,
+          'effectiveFrom': '1970-01-01',
+        };
+      } else if (hourlyWage != null && previousHourlyWage == null) {
+        baseline = {
+          if (previousPolicyOverride != null) ...previousPolicyOverride,
+          'hourlyWage': hourlyWage,
+          'effectiveFrom': '1970-01-01',
+        };
+      }
     }
 
-    if (policyOverride != null) {
-      // ③ 정책 밴드 (기준일부터 적용)
-      histEntries.add({
-        ...policyOverride!,
-        if (hourlyWage != null) 'hourlyWage': hourlyWage,
-        'effectiveFrom': policyDateStr,
-      });
+    final changed = <String, dynamic>{
+      if (policyOverride != null) ...policyOverride,
+      if (hourlyWage != null) 'hourlyWage': hourlyWage,
+      'effectiveFrom': policyOverride != null ? policyDateStr : wageDateStr,
+    };
+
+    final histEntries = _buildHistoryEntries(
+      existingHistoryRaw: existingWorkerHistoryRaw,
+      baseline: baseline,
+      changed: changed.isNotEmpty ? changed : null,
+    );
+
+    List<Map<String, dynamic>> _buildFullHistory(dynamic existingRaw) {
+      final existingList = (existingRaw is List)
+          ? existingRaw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
+          : <Map<String, dynamic>>[];
+      return _mergeHistoryEntriesByEffectiveFrom(
+          [...existingList, ...histEntries]);
     }
 
-    final policyHistoryEntry = histEntries.isNotEmpty ? histEntries : null;
+    final workerFullHistory = _buildFullHistory(existingWorkerHistoryRaw);
 
-    // ① 사장님 worker doc에 저장 (항상 성공)
-    // ✅ 미래 날짜부터 적용인 경우: 현재 시급/정책은 유지, policyHistory에만 추가
-    final todayDate = DateTime(today.year, today.month, today.day);
-    final wageIsNow =
-        effectiveFrom == null || !effectiveFrom.isAfter(todayDate);
-    final policyIsNow =
-        policyEffectiveFrom == null || !policyEffectiveFrom.isAfter(todayDate);
-
-    await _workerDoc(ownerUid: ownerUid, storeId: storeId, workerUid: workerUid)
-        .set({
+    await workerDocRef.set({
       'workerUid': workerUid,
       if (displayName != null) 'displayName': displayName,
       'inheritFromStore': inheritFromStore,
-      // 시급: effectiveFrom이 오늘 이전/당일이면 즉시 반영, 미래면 이력만 추가
       if (hourlyWage != null && wageIsNow) 'hourlyWage': hourlyWage,
       if (payDay != null) 'payDay': payDay,
-      // 정책: policyEffectiveFrom이 오늘 이전/당일이면 즉시 반영
       if (policyOverride != null && policyIsNow)
         'policyOverride': policyOverride,
-      if (policyHistoryEntry != null)
-        'policyHistory': FieldValue.arrayUnion(policyHistoryEntry),
+      if (workerFullHistory.isNotEmpty) 'policyHistory': workerFullHistory,
       'updatedAt': nowServer,
-      if (effectiveFrom != null)
-        'effectiveFrom': Timestamp.fromDate(effectiveFrom),
+      if (effectiveFrom != null) 'effectiveFrom': Timestamp.fromDate(wageDate),
+      if (policyEffectiveFrom != null)
+        'policyEffectiveFrom': Timestamp.fromDate(policyDate),
     }, SetOptions(merge: true));
 
-    // ② 알바생 storeJoins doc에도 동기화 (기존 doc ID 그대로 사용)
     try {
       final joinRef = await _resolveStoreJoinRef(
         workerUid: workerUid,
         ownerUid: ownerUid,
         storeId: storeId,
       );
+
+      final joinSnap = await joinRef.get();
+      final existingJoinHistoryRaw =
+          (joinSnap.data() ?? <String, dynamic>{})['policyHistory'];
+      final joinFullHistory = _buildFullHistory(existingJoinHistoryRaw);
+
       await joinRef.set({
-        'ownerUid': ownerUid, // ✅ Firestore rules 사장님 권한 검증용
-        'storeId': storeId, // ✅ 조회 편의
+        'ownerUid': ownerUid,
+        'storeId': storeId,
         'inheritFromStore': inheritFromStore,
-        // ✅ 미래 날짜부터 적용인 경우: 현재 시급/정책 유지
         if (hourlyWage != null && wageIsNow) ...{
           'hourlyWage': hourlyWage,
           'defaultHourlyWage': hourlyWage,
         },
         if (payDay != null) 'payDay': payDay,
         if (policyOverride != null && policyIsNow) 'policy': policyOverride,
-        if (policyHistoryEntry != null)
-          'policyHistory': FieldValue.arrayUnion(policyHistoryEntry),
-        // ✅ ownerSetting: 사장님이 마지막으로 설정한 값 (알바가 읽음)
+        if (joinFullHistory.isNotEmpty) 'policyHistory': joinFullHistory,
         'ownerSetting': {
           'inheritFromStore': inheritFromStore,
           if (hourlyWage != null && wageIsNow) 'hourlyWage': hourlyWage,
           if (payDay != null) 'payDay': payDay,
           if (policyOverride != null && policyIsNow) 'policy': policyOverride,
           if (effectiveFrom != null)
-            'effectiveFrom': Timestamp.fromDate(effectiveFrom),
+            'effectiveFrom': Timestamp.fromDate(wageDate),
+          if (policyEffectiveFrom != null)
+            'policyEffectiveFrom': Timestamp.fromDate(policyDate),
           'updatedAt': nowServer,
         },
         'updatedAt': nowServer,
@@ -757,22 +917,6 @@ class FirebaseService {
       'endedAtLocal': Timestamp.fromDate(nowLocal),
       'updatedAt': nowServer,
     }, SetOptions(merge: true));
-
-    try {
-      await _myStoreJoinDoc(
-        myUid: workerUid,
-        ownerUid: ownerUid,
-        storeId: storeId,
-      ).set({
-        'status': 'ended',
-        'endedReason': reason,
-        'endedAt': nowServer,
-        'endedAtLocal': Timestamp.fromDate(nowLocal),
-        'updatedAt': nowServer,
-      }, SetOptions(merge: true));
-    } catch (_) {
-      // ignore
-    }
   }
 
   /// ✅ 호환용 (소문자 메서드)
@@ -886,41 +1030,54 @@ class FirebaseService {
   }
 
   /// ✅ 개인 스케줄 구독 (알바생)
+  /// recentDays = 0 → 전체 기간 (제한 없음)
   Stream<List<UICalendarSchedule>> watchMyPersonalSchedulesUiRecentDays({
     required String workerUid,
-    int recentDays = 120,
+    int recentDays = 0,
   }) {
     if (workerUid.isEmpty) {
       return const Stream<List<UICalendarSchedule>>.empty();
     }
 
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: (recentDays <= 0 ? 1 : recentDays) - 1));
-    final startKey = _dateKey(start.year, start.month, start.day);
+    Query<Map<String, dynamic>> q;
+    if (recentDays > 0) {
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: recentDays - 1));
+      final startKey = _dateKey(start.year, start.month, start.day);
+      q = _mySchedulesRef(workerUid)
+          .where('dateKey', isGreaterThanOrEqualTo: startKey)
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    } else {
+      q = _mySchedulesRef(workerUid)
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    }
 
-    return _mySchedulesRef(workerUid)
-        .where('dateKey', isGreaterThanOrEqualTo: startKey)
-        .orderBy('dateKey', descending: false)
-        .orderBy('startMin', descending: false)
+    return q
         .snapshots()
         .map((qs) => qs.docs.map(_uiFromPersonalDoc).toList(growable: false));
   }
 
   /// ✅ 조인 스케줄 구독 (알바생)
+  /// recentDays = 0 → 전체 기간 (제한 없음)
   Stream<List<UICalendarSchedule>> watchMyJoinSchedulesByActiveJoins({
     required String workerUid,
     required Stream<List<ActiveJoinPath>> activeJoins$,
-    int recentDays = 120,
+    int recentDays = 0,
   }) {
     if (workerUid.isEmpty) {
       return const Stream<List<UICalendarSchedule>>.empty();
     }
 
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: (recentDays <= 0 ? 1 : recentDays) - 1));
-    final startKey = _dateKey(start.year, start.month, start.day);
+    int? startKey;
+    if (recentDays > 0) {
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: recentDays - 1));
+      startKey = _dateKey(start.year, start.month, start.day);
+    }
 
     late StreamController<List<UICalendarSchedule>> controller;
     StreamSubscription? joinsSub;
@@ -954,11 +1111,17 @@ class FirebaseService {
 
         if (perStoreSubs.containsKey(key)) continue;
 
-        final q = _storeSchedulesRef(ownerUid: j.ownerUid, storeId: j.storeId)
-            .where('workerUid', isEqualTo: workerUid)
-            .where('dateKey', isGreaterThanOrEqualTo: startKey)
-            .orderBy('dateKey', descending: false)
-            .orderBy('startMin', descending: false);
+        final base =
+            _storeSchedulesRef(ownerUid: j.ownerUid, storeId: j.storeId)
+                .where('workerUid', isEqualTo: workerUid);
+        final q = startKey != null
+            ? base
+                .where('dateKey', isGreaterThanOrEqualTo: startKey)
+                .orderBy('dateKey', descending: false)
+                .orderBy('startMin', descending: false)
+            : base
+                .orderBy('dateKey', descending: false)
+                .orderBy('startMin', descending: false);
 
         perStoreSubs[key] = q.snapshots().listen((qs) {
           latestByStore[key] =
@@ -998,10 +1161,11 @@ class FirebaseService {
   }
 
   /// ✅ 개인+조인 스케줄 합치기
+  /// recentDays = 0 → 전체 기간 (제한 없음)
   Stream<List<UICalendarSchedule>> watchMySchedulesUiMergedV2({
     required String workerUid,
     required Stream<List<ActiveJoinPath>> activeJoins$,
-    int recentDays = 120,
+    int recentDays = 0,
   }) {
     final join$ = watchMyJoinSchedulesByActiveJoins(
       workerUid: workerUid,
@@ -1091,7 +1255,6 @@ class FirebaseService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    // JOIN 스케줄 (사장님 매장에 추가)
     if (ownerUid != null &&
         ownerUid.isNotEmpty &&
         storeId != null &&
@@ -1104,7 +1267,6 @@ class FirebaseService {
       return;
     }
 
-    // PERSONAL 스케줄
     await _mySchedulesRef(workerUid).add({
       ...payload,
       'createdAt': FieldValue.serverTimestamp(),
@@ -1154,18 +1316,14 @@ class FirebaseService {
   }
 
   /// ✅ 개인/조인 알바 스케줄 시급 일괄 적용
-  /// - Firestore에서 전체 조회 (메모리 120일 제한 없음)
-  /// - todayOnly=true : 오늘 날짜만
-  /// - fromDate~untilDate : 범위 지정 (null=제한없음)
   Future<void> bulkUpdateScheduleWage({
     required String workerUid,
     required String albaId,
     required int newWage,
-    required List<UICalendarSchedule>
-        schedules, // 오늘~미래 범위용 (todayOnly/fromDate)
+    required List<UICalendarSchedule> schedules,
     bool todayOnly = false,
     DateTime? fromDate,
-    DateTime? untilDate, // 이 날짜 직전까지 (과거 고정용)
+    DateTime? untilDate,
   }) async {
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
@@ -1174,37 +1332,31 @@ class FirebaseService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    // ✅ 과거 스케줄 고정 (untilDate 지정) → Firestore 직접 전체 조회 (범위 무제한)
     if (untilDate != null) {
       final untilKey = _dateKey(untilDate.year, untilDate.month, untilDate.day);
       final fromKey = fromDate != null
           ? _dateKey(fromDate.year, fromDate.month, fromDate.day)
           : null;
 
-      // ✅ [BUG FIX] isNull 필터를 Firestore 쿼리에서 제거.
-      //    복합 인덱스(albaId + dateKey + overrideHourlyWage) 없이도 동작하도록
-      //    Firestore에서 날짜 범위만 조회한 뒤, 메모리에서 override 없는 것만 필터.
       var q = _mySchedulesRef(workerUid)
           .where('albaId', isEqualTo: albaId)
           .where('dateKey', isLessThan: untilKey);
-      if (fromKey != null)
+      if (fromKey != null) {
         q = q.where('dateKey', isGreaterThanOrEqualTo: fromKey);
+      }
       final personalSnap = await q.get();
-      // 이미 override 된 것은 건드리지 않음 (기존 기록 보존) - 메모리 필터
       final personalDocs = personalSnap.docs
           .where((d) => d.data()['overrideHourlyWage'] == null)
           .toList();
 
-      // 조인 스케줄 (docPath 기반)
       final joinDocs = schedules
           .where((s) =>
               s.albaId == albaId && s.docPath != null && s.docPath!.isNotEmpty)
           .toList();
-      // 조인 스케줄은 ownerUid/storeId를 docPath에서 파싱해서 재조회
+
       final Set<String> ownerStorePairs = {};
       for (final s in joinDocs) {
         final parts = s.docPath!.split('/');
-        // users/{ownerUid}/stores/{storeId}/schedules/{id}
         if (parts.length >= 6) {
           ownerStorePairs.add('${parts[1]}/${parts[3]}');
         }
@@ -1214,14 +1366,13 @@ class FirebaseService {
       for (final pair in ownerStorePairs) {
         final parts = pair.split('/');
         final ownerUid2 = parts[0], storeId2 = parts[1];
-        // ✅ [BUG FIX] isNull 필터 제거 → 메모리 필터로 대체
         var jq = _storeSchedulesRef(ownerUid: ownerUid2, storeId: storeId2)
             .where('workerUid', isEqualTo: workerUid)
             .where('dateKey', isLessThan: untilKey);
-        if (fromKey != null)
+        if (fromKey != null) {
           jq = jq.where('dateKey', isGreaterThanOrEqualTo: fromKey);
+        }
         final snap = await jq.get();
-        // 이미 override 된 것은 건드리지 않음 - 메모리 필터
         allJoinDocs.addAll(
           snap.docs.where((d) => d.data()['overrideHourlyWage'] == null),
         );
@@ -1242,7 +1393,6 @@ class FirebaseService {
       return;
     }
 
-    // ✅ 오늘 이후 스케줄 → 메모리 리스트 사용 (이미 스트림에서 최신 로드됨)
     final effectiveFrom = fromDate ?? todayDate;
     final targets = schedules.where((s) {
       if (s.albaId != albaId) return false;
@@ -1270,7 +1420,6 @@ class FirebaseService {
   }
 
   /// ✅ 사장님 측 스케줄 시급 일괄 업데이트
-  /// - Firestore 직접 전체 조회 (메모리 120일 제한 없음)
   Future<void> bulkUpdateStoreScheduleWage({
     required String ownerUid,
     required String storeId,
@@ -1288,21 +1437,19 @@ class FirebaseService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    // ✅ 과거 고정 (untilDate 있음) → Firestore 직접 전체 조회
     if (untilDate != null) {
       final untilKey = _dateKey(untilDate.year, untilDate.month, untilDate.day);
       final fromKey = fromDate != null
           ? _dateKey(fromDate.year, fromDate.month, fromDate.day)
           : null;
 
-      // ✅ workerUid + dateKey 복합 인덱스 불필요: dateKey만 Firestore 필터, workerUid는 메모리 필터
       var q = _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId)
           .where('dateKey', isLessThan: untilKey);
-      if (fromKey != null)
+      if (fromKey != null) {
         q = q.where('dateKey', isGreaterThanOrEqualTo: fromKey);
+      }
 
       final snap = await q.get();
-      // workerUid 일치 + 이미 override된 스케줄은 건드리지 않음 - 메모리 필터
       final filteredDocs = snap.docs
           .where((d) =>
               d.data()['workerUid'] == workerUid &&
@@ -1322,7 +1469,6 @@ class FirebaseService {
       return;
     }
 
-    // ✅ 오늘 이후 → 메모리 리스트 사용
     final effectiveFrom = fromDate ?? todayDate;
     final targets = schedules.where((s) {
       if (s.workerUid != workerUid) return false;
@@ -1551,56 +1697,68 @@ class FirebaseService {
 
   DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  /// ✅ 매장 전체 스케줄 실시간 구독 (최근 N일)
+  /// ✅ 매장 전체 스케줄 실시간 구독
+  /// recentDays = 0 → 전체 기간 (제한 없음)
   Stream<List<StoreSchedule>> watchRecentSchedulesForStore({
     required String ownerUid,
     required String storeId,
-    int recentDays = 120,
+    int recentDays = 0,
   }) {
     if (ownerUid.isEmpty || storeId.isEmpty) {
       return const Stream<List<StoreSchedule>>.empty();
     }
 
-    final now = DateTime.now();
-    final start = _startOfDay(now).subtract(
-      Duration(days: (recentDays <= 0 ? 1 : recentDays) - 1),
-    );
-    final startKey = _dateKey(start.year, start.month, start.day);
+    final ref = _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId);
+    Query<Map<String, dynamic>> q;
+    if (recentDays > 0) {
+      final start =
+          _startOfDay(DateTime.now()).subtract(Duration(days: recentDays - 1));
+      final startKey = _dateKey(start.year, start.month, start.day);
+      q = ref
+          .where('dateKey', isGreaterThanOrEqualTo: startKey)
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    } else {
+      q = ref
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    }
 
-    return _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId)
-        .where('dateKey', isGreaterThanOrEqualTo: startKey)
-        .orderBy('dateKey', descending: false)
-        .orderBy('startMin', descending: false)
-        .snapshots()
-        .map(
-            (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
+    return q.snapshots().map(
+        (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
   }
 
   /// ✅ 특정 근무자 스케줄 read-only 구독
+  /// recentDays = 0 → 전체 기간 (제한 없음)
   Stream<List<StoreSchedule>> watchSchedulesForWorkerReadOnly({
     required String ownerUid,
     required String storeId,
     required String workerUid,
-    int recentDays = 365,
+    int recentDays = 0,
   }) {
     if (ownerUid.isEmpty || storeId.isEmpty || workerUid.isEmpty) {
       return const Stream<List<StoreSchedule>>.empty();
     }
 
-    final now = DateTime.now();
-    final start = _startOfDay(now).subtract(
-      Duration(days: (recentDays <= 0 ? 1 : recentDays) - 1),
-    );
-    final startKey = _dateKey(start.year, start.month, start.day);
+    final base = _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId)
+        .where('workerUid', isEqualTo: workerUid);
+    Query<Map<String, dynamic>> q;
+    if (recentDays > 0) {
+      final start =
+          _startOfDay(DateTime.now()).subtract(Duration(days: recentDays - 1));
+      final startKey = _dateKey(start.year, start.month, start.day);
+      q = base
+          .where('dateKey', isGreaterThanOrEqualTo: startKey)
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    } else {
+      q = base
+          .orderBy('dateKey', descending: false)
+          .orderBy('startMin', descending: false);
+    }
 
-    return _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId)
-        .where('workerUid', isEqualTo: workerUid)
-        .where('dateKey', isGreaterThanOrEqualTo: startKey)
-        .orderBy('dateKey', descending: false)
-        .orderBy('startMin', descending: false)
-        .snapshots()
-        .map(
-            (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
+    return q.snapshots().map(
+        (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
   }
 
   /// ✅ 기간 조회 (급여 계산용)
@@ -1645,6 +1803,245 @@ class FirebaseService {
     return out;
   }
 
+  /// ✅ 사장님 내 정보용 최근 N개월 인건비(총지급) 실시간 합산 스트림
+  Stream<List<Map<String, dynamic>>> watchOwnerMonthlyGrossPoints({
+    required String ownerUid,
+    int months = 3,
+  }) {
+    if (ownerUid.trim().isEmpty) {
+      return Stream.value(const <Map<String, dynamic>>[]);
+    }
+
+    late StreamController<List<Map<String, dynamic>>> controller;
+    StreamSubscription<List<Store>>? storesSub;
+
+    final Map<String, StreamSubscription<List<StoreWorker>>> workerSubs = {};
+    final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+        scheduleSubs = {};
+
+    final Map<String, Store> latestStores = {};
+    final Map<String, List<StoreWorker>> latestWorkersByStore = {};
+    final Map<String, List<StoreSchedule>> latestSchedulesByStore = {};
+
+    const docSvc = PayrollDocumentService();
+
+    DateTime dateOnlyLocal(DateTime d) => DateTime(d.year, d.month, d.day);
+
+    List<Map<String, dynamic>> buildPoints() {
+      final now = DateTime.now();
+      final totals = <String, int>{};
+
+      for (int offset = months - 1; offset >= 0; offset--) {
+        final dt = DateTime(now.year, now.month - offset, 1);
+        totals['${dt.year}-${dt.month}'] = 0;
+      }
+
+      for (final entry in latestStores.entries) {
+        final storeId = entry.key;
+        final store = entry.value;
+        final workers = latestWorkersByStore[storeId] ?? const <StoreWorker>[];
+        final schedules =
+            latestSchedulesByStore[storeId] ?? const <StoreSchedule>[];
+
+        for (int offset = months - 1; offset >= 0; offset--) {
+          final dt = DateTime(now.year, now.month - offset, 1);
+          final key = '${dt.year}-${dt.month}';
+
+          final rows = docSvc.buildCalendarMonthDocument(
+            store: store,
+            workers: workers,
+            schedules: schedules,
+            year: dt.year,
+            month: dt.month,
+          );
+
+          int gross = 0;
+          for (final row in rows) {
+            gross += row.gross;
+          }
+          totals[key] = (totals[key] ?? 0) + gross;
+        }
+      }
+
+      final out = <Map<String, dynamic>>[];
+      for (int offset = months - 1; offset >= 0; offset--) {
+        final dt = DateTime(now.year, now.month - offset, 1);
+        final key = '${dt.year}-${dt.month}';
+        out.add({
+          'year': dt.year,
+          'month': dt.month,
+          'gross': totals[key] ?? 0,
+        });
+      }
+      return out;
+    }
+
+    Future<void> resubscribeStores(List<Store> stores) async {
+      final keepIds = stores.map((e) => e.id).toSet();
+
+      for (final store in stores) {
+        latestStores[store.id] = store;
+
+        if (!workerSubs.containsKey(store.id)) {
+          workerSubs[store.id] = watchWorkers(
+            ownerUid: ownerUid,
+            storeId: store.id,
+            activeOnly: false,
+          ).listen((workers) {
+            latestWorkersByStore[store.id] = workers;
+            if (!controller.isClosed) {
+              controller.add(buildPoints());
+            }
+          });
+        }
+
+        if (!scheduleSubs.containsKey(store.id)) {
+          final now = DateTime.now();
+          final firstMonth = DateTime(now.year, now.month - (months - 1), 1);
+          final lastMonth = DateTime(now.year, now.month, 1);
+
+          final fetchStart =
+              dateOnlyLocal(firstMonth.subtract(const Duration(days: 62)));
+          final fetchEnd = DateTime(lastMonth.year, lastMonth.month + 1, 0);
+
+          final startKey =
+              _dateKey(fetchStart.year, fetchStart.month, fetchStart.day);
+          final endKey = _dateKey(fetchEnd.year, fetchEnd.month, fetchEnd.day);
+
+          final q = _storeSchedulesRef(ownerUid: ownerUid, storeId: store.id)
+              .where('dateKey', isGreaterThanOrEqualTo: startKey)
+              .where('dateKey', isLessThanOrEqualTo: endKey)
+              .orderBy('dateKey', descending: false)
+              .orderBy('startMin', descending: false);
+
+          scheduleSubs[store.id] = q.snapshots().listen((snap) {
+            latestSchedulesByStore[store.id] =
+                snap.docs.map(StoreSchedule.fromDoc).toList(growable: false);
+            if (!controller.isClosed) {
+              controller.add(buildPoints());
+            }
+          });
+        }
+      }
+
+      final removeWorkerIds =
+          workerSubs.keys.where((id) => !keepIds.contains(id)).toList();
+      for (final id in removeWorkerIds) {
+        await workerSubs[id]?.cancel();
+        workerSubs.remove(id);
+        latestWorkersByStore.remove(id);
+      }
+
+      final removeScheduleIds =
+          scheduleSubs.keys.where((id) => !keepIds.contains(id)).toList();
+      for (final id in removeScheduleIds) {
+        await scheduleSubs[id]?.cancel();
+        scheduleSubs.remove(id);
+        latestSchedulesByStore.remove(id);
+      }
+
+      latestStores.removeWhere((key, value) => !keepIds.contains(key));
+
+      if (!controller.isClosed) {
+        controller.add(buildPoints());
+      }
+    }
+
+    controller = StreamController<List<Map<String, dynamic>>>.broadcast(
+      onListen: () {
+        storesSub = watchStores(ownerUid).listen((stores) {
+          resubscribeStores(stores);
+        });
+      },
+      onCancel: () async {
+        await storesSub?.cancel();
+        for (final sub in workerSubs.values) {
+          await sub.cancel();
+        }
+        for (final sub in scheduleSubs.values) {
+          await sub.cancel();
+        }
+        workerSubs.clear();
+        scheduleSubs.clear();
+        latestStores.clear();
+        latestWorkersByStore.clear();
+        latestSchedulesByStore.clear();
+        await controller.close();
+      },
+    );
+
+    return controller.stream;
+  }
+
+  /// ✅ owner 월별 인건비 그래프용 즉시 1회 조회
+  Future<List<Map<String, dynamic>>> fetchOwnerMonthlyGrossPointsOnce({
+    required String ownerUid,
+    int months = 3,
+  }) async {
+    if (ownerUid.trim().isEmpty) return const <Map<String, dynamic>>[];
+
+    final stores = await watchStores(ownerUid).first;
+    final now = DateTime.now();
+    final totals = <String, int>{};
+    const docSvc = PayrollDocumentService();
+
+    for (int offset = months - 1; offset >= 0; offset--) {
+      final dt = DateTime(now.year, now.month - offset, 1);
+      totals['${dt.year}-${dt.month}'] = 0;
+    }
+
+    for (final store in stores) {
+      final workers = await watchWorkers(
+        ownerUid: ownerUid,
+        storeId: store.id,
+        activeOnly: false,
+      ).first;
+
+      for (int offset = months - 1; offset >= 0; offset--) {
+        final dt = DateTime(now.year, now.month - offset, 1);
+        final key = '${dt.year}-${dt.month}';
+
+        final monthStart = DateTime(dt.year, dt.month, 1);
+        final monthEnd = DateTime(dt.year, dt.month + 1, 0);
+        final fetchStart = monthStart.subtract(const Duration(days: 62));
+        final fetchEnd = monthEnd;
+
+        final schedules = await fetchSchedulesForStoreInRange(
+          ownerUid: ownerUid,
+          storeId: store.id,
+          startInclusive: fetchStart,
+          endInclusive: fetchEnd,
+        );
+
+        final rows = docSvc.buildCalendarMonthDocument(
+          store: store,
+          workers: workers,
+          schedules: schedules,
+          year: dt.year,
+          month: dt.month,
+        );
+
+        int gross = 0;
+        for (final row in rows) {
+          gross += row.gross;
+        }
+        totals[key] = (totals[key] ?? 0) + gross;
+      }
+    }
+
+    final out = <Map<String, dynamic>>[];
+    for (int offset = months - 1; offset >= 0; offset--) {
+      final dt = DateTime(now.year, now.month - offset, 1);
+      final key = '${dt.year}-${dt.month}';
+      out.add({
+        'year': dt.year,
+        'month': dt.month,
+        'gross': totals[key] ?? 0,
+      });
+    }
+    return out;
+  }
+
   // ═══════════════════════════════════════════════
   // 🏠 PERSONAL ALBA (개인 알바)
   // ═══════════════════════════════════════════════
@@ -1671,8 +2068,6 @@ class FirebaseService {
   }
 
   /// ✅ 개인 알바 정책 스트림 (albaId → policy map)
-  /// 앱 재시작 후 정책 복원에 사용
-  /// 개인 알바 정책 + policyHistory 구독
   Stream<Map<String, Map<String, dynamic>>> watchMyPersonalAlbaPolicies(
       String uid) {
     return _myAlbasRef(uid)
@@ -1684,7 +2079,6 @@ class FirebaseService {
         final d = doc.data();
         final policy = (d['policy'] as Map?)?.cast<String, dynamic>();
         if (policy != null && policy.isNotEmpty) {
-          // ✅ policyHistory도 함께 전달
           final merged = Map<String, dynamic>.from(policy);
           final hist = d['policyHistory'];
           if (hist != null) merged['_policyHistory'] = hist;
@@ -1702,10 +2096,9 @@ class FirebaseService {
     required int hourlyWage,
     required String colorHex,
     required int payDay,
-    Map<String, dynamic>? policy, // ✅ 세금·보험·수당 정책
+    Map<String, dynamic>? policy,
   }) async {
-    final today = DateTime.now();
-    final todayStr = '1970-01-01'; // 초기 밴드: 처음부터 이 시급 적용
+    const todayStr = '1970-01-01';
     final initialHist = <Map<String, dynamic>>[
       {
         'hourlyWage': hourlyWage,
@@ -1758,21 +2151,19 @@ class FirebaseService {
     required String albaId,
     required String name,
     required int hourlyWage,
-    int? previousHourlyWage, // ✅ 변경 전 시급 (이력 저장용)
+    int? previousHourlyWage,
     required String colorHex,
     required int payDay,
-    Map<String, dynamic>? policy, // null이면 정책 미변경
-    DateTime? policyEffectiveFrom, // ✅ 정책 적용 시작일 (null=오늘)
-    DateTime? wageEffectiveFrom, // ✅ 시급 적용 시작일 (null=오늘)
+    Map<String, dynamic>? policy,
+    Map<String, dynamic>? previousPolicy,
+    DateTime? policyEffectiveFrom,
+    DateTime? wageEffectiveFrom,
   }) async {
     final today = DateTime.now();
-    // 시급/정책 날짜 분리
-    final wageDateEff = wageEffectiveFrom ?? today;
-    final wageDateStr =
-        _dateKey(wageDateEff.year, wageDateEff.month, wageDateEff.day);
-    final policyDateEff = policyEffectiveFrom ?? today;
-    final policyDateStr =
-        _dateKey(policyDateEff.year, policyDateEff.month, policyDateEff.day);
+    final wageDateEff = _dateOnly(wageEffectiveFrom ?? today);
+    final wageDateStr = _ymdStr(wageDateEff);
+    final policyDateEff = _dateOnly(policyEffectiveFrom ?? today);
+    final policyDateStr = _ymdStr(policyDateEff);
 
     final data = <String, dynamic>{
       'name': name,
@@ -1781,45 +2172,133 @@ class FirebaseService {
       'payDay': payDay,
       'updatedAt': FieldValue.serverTimestamp(),
     };
-    // ✅ 정책·시급 변경 이력 (날짜 분리 저장)
     if (policy != null) {
       data['policy'] = policy;
     }
-    // ✅ 핵심: 이전 시급을 "1970-01-01" 초기 밴드로 명시 저장
-    final histEntries = <Map<String, dynamic>>[];
 
-    if (previousHourlyWage != null) {
-      // ① 이전 시급 초기 밴드
-      histEntries.add(
-          {'hourlyWage': previousHourlyWage, 'effectiveFrom': '1970-01-01'});
-      // ② 새 시급 밴드
-      histEntries.add({
-        'hourlyWage': hourlyWage,
-        'effectiveFrom': wageDateStr,
-      });
-    } else {
-      // 최초 등록
-      histEntries.add({
-        'hourlyWage': hourlyWage,
-        'effectiveFrom': '1970-01-01',
-      });
+    // 기존 policyHistory 읽기
+    final existingDoc = await _myAlbasRef(uid).doc(albaId).get();
+    final existingHistoryRaw =
+        (existingDoc.data() ?? <String, dynamic>{})['policyHistory'];
+
+    Map<String, dynamic>? baseline;
+    if (!_hasPolicyHistory(existingHistoryRaw)) {
+      if (previousHourlyWage != null) {
+        baseline = {
+          if (previousPolicy != null) ...previousPolicy,
+          'hourlyWage': previousHourlyWage,
+          'effectiveFrom': '1970-01-01',
+        };
+      } else {
+        baseline = {
+          if (previousPolicy != null) ...previousPolicy,
+          'hourlyWage': hourlyWage,
+          'effectiveFrom': '1970-01-01',
+        };
+      }
     }
 
-    if (policy != null) {
-      // ③ 정책 밴드
-      histEntries.add({
-        ...policy,
-        'hourlyWage': hourlyWage,
-        'effectiveFrom': policyDateStr,
-      });
-    }
+    final changed = <String, dynamic>{
+      if (policy != null) ...policy,
+      'hourlyWage': hourlyWage,
+      'effectiveFrom': policy != null ? policyDateStr : wageDateStr,
+    };
+
+    final histEntries = _buildHistoryEntries(
+      existingHistoryRaw: existingHistoryRaw,
+      baseline: baseline,
+      changed: changed,
+    );
+
     if (histEntries.isNotEmpty) {
-      data['policyHistory'] = FieldValue.arrayUnion(histEntries);
+      final existingList = (existingHistoryRaw is List)
+          ? existingHistoryRaw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
+          : <Map<String, dynamic>>[];
+      data['policyHistory'] = _mergeHistoryEntriesByEffectiveFrom(
+          [...existingList, ...histEntries]);
     }
     await _myAlbasRef(uid).doc(albaId).set(data, SetOptions(merge: true));
   }
 
-  /// ✅ Join 알바 시급만 업데이트 (알바생이 직접 변경 가능한 유일한 항목)
+  /// ✅ 알바생이 직접 매장을 탈퇴
+  Future<void> leaveStore({
+    required String workerUid,
+    required String storeId,
+  }) async {
+    final qs = await _myStoreJoinsRef(workerUid)
+        .where('storeId', isEqualTo: storeId)
+        .limit(1)
+        .get();
+
+    if (qs.docs.isEmpty) return;
+
+    final joinData = qs.docs.first.data();
+    final ownerUid = joinData['ownerUid'] as String?;
+    final now = DateTime.now();
+
+    await qs.docs.first.reference.set(
+      {
+        'status': 'ended',
+        'updatedAt': FieldValue.serverTimestamp(),
+        'endedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+
+    if (ownerUid != null && ownerUid.isNotEmpty) {
+      try {
+        await _workerDoc(
+          ownerUid: ownerUid,
+          storeId: storeId,
+          workerUid: workerUid,
+        ).set({
+          'status': 'ended',
+          'updatedAt': FieldValue.serverTimestamp(),
+          'endedAt': FieldValue.serverTimestamp(),
+          'endedAtLocal': Timestamp.fromDate(now),
+          'endedReason': 'self_left',
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
+  }
+
+  /// ✅ 알바생 완전삭제
+  Future<void> deleteWorkerCompletely({
+    required String ownerUid,
+    required String storeId,
+    required String workerUid,
+  }) async {
+    if (ownerUid.isEmpty || storeId.isEmpty || workerUid.isEmpty) return;
+
+    DocumentSnapshot<Map<String, dynamic>>? lastDoc;
+    while (true) {
+      Query<Map<String, dynamic>> q =
+          _storeSchedulesRef(ownerUid: ownerUid, storeId: storeId)
+              .where('workerUid', isEqualTo: workerUid)
+              .limit(400);
+      if (lastDoc != null) q = q.startAfterDocument(lastDoc);
+      final snap = await q.get();
+      if (snap.docs.isEmpty) break;
+      final batch = _db.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      if (snap.docs.length < 400) break;
+      lastDoc = snap.docs.last;
+    }
+
+    await _workerDoc(
+      ownerUid: ownerUid,
+      storeId: storeId,
+      workerUid: workerUid,
+    ).delete();
+  }
+
+  /// ✅ Join 알바 시급만 업데이트
   Future<void> updateJoinAlbaWage({
     required String uid,
     required String ownerUid,
@@ -1833,6 +2312,24 @@ class FirebaseService {
     ).set({
       'hourlyWage': hourlyWage,
       'defaultHourlyWage': hourlyWage,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ 알바생이 join 매장 색상을 개인 설정으로 변경
+  Future<void> updateJoinAlbaColorHex({
+    required String workerUid,
+    required String ownerUid,
+    required String storeId,
+    required String colorHex,
+  }) async {
+    final joinRef = await _resolveStoreJoinRef(
+      workerUid: workerUid,
+      ownerUid: ownerUid,
+      storeId: storeId,
+    );
+    await joinRef.set({
+      'colorHex': colorHex,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -1853,7 +2350,7 @@ class FirebaseService {
     return int.tryParse('$v');
   }
 
-  /// ✅ 활성 조인 경로 구독 (스케줄 구독용)
+  /// ✅ 활성 조인 경로 구독
   Stream<List<ActiveJoinPath>> watchActiveJoinPaths(String uid) {
     return _myStoreJoinsRef(uid).snapshots().map((snap) {
       final out = <ActiveJoinPath>[];
@@ -1893,7 +2390,7 @@ class FirebaseService {
     });
   }
 
-  /// ✅ 조인 매장 목록 구독 (홈 화면용)
+  /// ✅ 조인 매장 목록 구독
   Stream<List<UICalendarAlba>> watchMyAlbas(String uid) {
     return _myStoreJoinsRef(uid).snapshots().map((snap) {
       final items = <({UICalendarAlba alba, DateTime recent})>[];
@@ -1913,7 +2410,6 @@ class FirebaseService {
             : ((storeName != null && storeName.isNotEmpty) ? storeName : '매장');
 
         final colorHex = (m['colorHex'] as String?) ?? '#3B82F6';
-        // ✅ ownerSetting 우선 (사장님이 설정한 값 → 사장님 storeJoins 동기화)
         final ownerSetting =
             (m['ownerSetting'] as Map?)?.cast<String, dynamic>();
         final wage = _toInt(ownerSetting?['hourlyWage']) ??
@@ -1961,7 +2457,6 @@ class FirebaseService {
         final storeId = ((m['storeId'] as String?) ?? d.id).trim();
         if (storeId.isEmpty) continue;
 
-        // ✅ ownerSetting 우선 (사장님 설정 실시간 반영)
         final ownerSettingDef =
             (m['ownerSetting'] as Map?)?.cast<String, dynamic>();
         final payDay =

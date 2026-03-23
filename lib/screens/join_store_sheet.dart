@@ -6,6 +6,7 @@ import '../common/app_words.dart';
 import '../models/store.dart';
 import '../models/alba_form_models.dart';
 import '../policies/policies.dart' as pol;
+import 'subscription_screen.dart';
 
 class JoinStoreSheetResult {
   final String code;
@@ -109,6 +110,45 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
       final name =
           (storeName != null && storeName.isNotEmpty) ? storeName : '매장';
 
+      // ── 정원 초과 체크 ──────────────────────────────────────────
+      if (kSubscriptionEnabled) {
+        final workersSnap = await db
+            .collection('users')
+            .doc(ownerUid)
+            .collection('stores')
+            .doc(storeId)
+            .collection('workers')
+            .get();
+
+        final activeCount = workersSnap.docs.where((d) {
+          final status = d.data()['status'] as String? ?? '';
+          return status != 'ended' && status != 'deleted';
+        }).length;
+
+        // TODO: 사장님 실제 플랜 Firestore에서 읽어오기
+        final planLimit = kPlans[0].maxWorkers; // 무료 플랜 기본값
+
+        if (activeCount >= planLimit) {
+          // 사장님에게 정원 초과 알림 기록
+          await db
+              .collection('users')
+              .doc(ownerUid)
+              .collection('notifications')
+              .add({
+            'type': 'capacityBlocked',
+            'storeId': storeId,
+            'storeName': name,
+            'createdAt': FieldValue.serverTimestamp(),
+            'read': false,
+          });
+
+          _setError('이 매장의 정원이 꽉 찼어요.\n사장님께 문의해 주세요.');
+          _setLoading(false);
+          return;
+        }
+      }
+      // ────────────────────────────────────────────────────────────
+
       final colorHex = (m['colorHex'] as String?) ?? '#3B82F6';
 
       final hourlyWage =
@@ -167,7 +207,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
         JoinStoreSheetResult(code: code, store: store, initial: initial),
       );
     } catch (e) {
-      _setError('다시 시도해 주세요.\n$e');
+      _setError('매장 코드를 확인하거나 잠시 후 다시 시도해 주세요.');
     } finally {
       _setLoading(false);
     }

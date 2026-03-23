@@ -277,13 +277,9 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
     final anchorDay = (_policy.monthlyStartDay ?? 16).clamp(1, 31);
 
     return SafeArea(
-      child: Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.85,
-          child: Column(
-            children: [
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
               // ── 헤더
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 12, 10),
@@ -315,7 +311,7 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
               ),
               Container(height: 1, color: const Color(0xFFF0F0F5)),
 
-              Expanded(
+              Flexible(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
                   children: [
@@ -324,20 +320,21 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
                     const SizedBox(height: 10),
 
                     _RadioTile(
-                      label: '한 달 묶기',
-                      desc: '매달 1일 ~ 말일',
+                      label: '매달 1일 ~ 말일',
+                      desc: '가장 많이 쓰는 방식이에요',
                       selected: _kind == _MvpPayrollKind.calendarMonth,
                       onTap: () => _applyKind(_MvpPayrollKind.calendarMonth),
                     ),
                     const SizedBox(height: 6),
                     _RadioTile(
-                      label: '날짜 기준으로 묶기',
-                      desc: _kind == _MvpPayrollKind.anchorMonth
+                      label: _kind == _MvpPayrollKind.anchorMonth
                           ? _anchorDesc(anchorDay)
-                          : '예: 16일 ~ 다음달 15일',
+                          : '매달 16일 ~ 다음달 15일',
+                      desc: _kind == _MvpPayrollKind.anchorMonth
+                          ? '위 버튼으로 날짜를 바꿀 수 있어요'
+                          : '시작일을 직접 정할 수 있어요',
                       selected: _kind == _MvpPayrollKind.anchorMonth,
                       onTap: () => _applyKind(_MvpPayrollKind.anchorMonth),
-                      // 선택됐을 때만 날짜 변경 버튼 표시
                       trailing: _kind == _MvpPayrollKind.anchorMonth
                           ? GestureDetector(
                               onTap: _pickAnchorStartDay,
@@ -361,8 +358,8 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
                     ),
                     const SizedBox(height: 6),
                     _RadioTile(
-                      label: '하루씩 계산 (일급)',
-                      desc: '근무한 날마다 따로 계산해요',
+                      label: '일급',
+                      desc: '하루씩 따로 계산해요',
                       selected: _kind == _MvpPayrollKind.shortTermDaily,
                       onTap: () => _applyKind(_MvpPayrollKind.shortTermDaily),
                     ),
@@ -374,8 +371,8 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
                     const SizedBox(height: 10),
 
                     _RadioTile(
-                      label: '마감일에 바로 지급',
-                      desc: '계산 기간 마지막 날에 받아요',
+                      label: '정산 마지막 날에 바로',
+                      desc: '계산 기간이 끝나는 날에 받아요',
                       selected: _policy.payRule.type ==
                           PayDateRuleType.samePeriodEndDay,
                       onTap: () =>
@@ -385,8 +382,8 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
 
                     // 마감 후 N일
                     _RadioTile(
-                      label: '마감 후 며칠 뒤',
-                      desc: '마감일로부터 며칠 후에 받아요',
+                      label: '정산 끝나고 며칠 뒤',
+                      desc: '마감일로부터 며칠 뒤에 받아요',
                       selected: _policy.payRule.type ==
                           PayDateRuleType.afterEndPlusDays,
                       onTap: () {
@@ -434,8 +431,8 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
 
                     // 매달 N일
                     _RadioTile(
-                      label: '매달 정해진 날',
-                      desc: '예: 매달 25일',
+                      label: '매달 정해진 날짜에',
+                      desc: '예: 매달 25일에 받아요',
                       selected: _policy.payRule.type ==
                           PayDateRuleType.nextMonthlyDay,
                       onTap: () {
@@ -512,9 +509,7 @@ class _PayrollPolicySheetState extends State<_PayrollPolicySheet> {
               ),
             ],
           ),
-        ),
-      ),
-    );
+        );
   }
 }
 
@@ -596,6 +591,17 @@ class _RadioTile extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: selected ? _purple : const Color(0xFF111827),
                       )),
+                  if (desc != null) ...[
+                    const SizedBox(height: 2),
+                    Text(desc!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: selected
+                              ? _purple.withOpacity(0.65)
+                              : const Color(0xFF9CA3AF),
+                        )),
+                  ],
                 ],
               ),
             ),

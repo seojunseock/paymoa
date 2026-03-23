@@ -5,10 +5,14 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'ads/ad_service.dart';
 
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
 import 'firebase_options.dart';
 import 'role/role_gate.dart';
+import 'screens/terms_screen.dart';
+import 'screens/privacy_policy_screen.dart';
 
 final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
@@ -20,11 +24,14 @@ Future<void> main() async {
     WidgetsFlutterBinding.ensureInitialized();
 
     // 카카오 SDK 초기화 (네이티브 앱 키)
-    KakaoSdk.init(nativeAppKey: '0caeaf697a204f827b9d8525bd376311');
+    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
 
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    await MobileAds.instance.initialize();
+    AdService.instance.preloadRewardedAd();
 
     await initializeDateFormatting('ko_KR', null);
 
@@ -208,6 +215,20 @@ class _SafeBootApp extends StatelessWidget {
           ),
         ),
       ),
+      builder: (context, child) => GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.translucent,
+        child: MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.noScaling,
+          ),
+          child: child!,
+        ),
+      ),
+      routes: {
+        '/terms': (_) => const TermsScreen(),
+        '/privacy': (_) => const PrivacyPolicyScreen(),
+      },
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snap) {
@@ -227,19 +248,23 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image(
-              image: AssetImage('assets/images/splash_logo.png'),
-              width: 160,
-              height: 160,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(36),
+              child: const Image(
+                image: AssetImage('assets/images/app_icon.png'),
+                width: 120,
+                height: 120,
+                fit: BoxFit.cover,
+              ),
             ),
-            SizedBox(height: 24),
-            Text(
+            const SizedBox(height: 24),
+            const Text(
               '페이모아',
               style: TextStyle(
                 fontSize: 40,

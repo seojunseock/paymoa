@@ -14,6 +14,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   Future<void> _handlePick(UserRole role) async {
     if (_busy) return;
+
     setState(() => _busy = true);
 
     try {
@@ -22,10 +23,12 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('역할 선택 중 오류가 발생했어요: $e'),
+          content: const Text('오류가 발생했어요. 잠시 후 다시 시도해 주세요.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
+    } finally {
+      if (!mounted) return;
       setState(() => _busy = false);
     }
   }
@@ -49,14 +52,12 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 8),
-
-              // ── 앱 아이콘 (로그인 화면과 동일한 방식)
               Container(
                 width: 96,
                 height: 96,
@@ -79,16 +80,14 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: Image.asset(
-                    'assets/images/splash_logo.png',
+                    'assets/images/app_icon.png',
                     width: 96,
                     height: 96,
-                    fit: BoxFit.contain,
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),
-
               const SizedBox(height: 18),
-
               const Text(
                 '페이모아',
                 style: TextStyle(
@@ -98,9 +97,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   letterSpacing: -0.5,
                 ),
               ),
-
               const SizedBox(height: 32),
-
               const Text(
                 '어떤 역할로 시작할까요?',
                 style: TextStyle(
@@ -120,10 +117,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   height: 1.5,
                 ),
               ),
-
               const SizedBox(height: 28),
-
-              // ── 사장님 카드
               _RoleCard(
                 enabled: !_busy,
                 title: '사장님으로 시작',
@@ -132,10 +126,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 accent: const Color(0xFF7C3AED),
                 onTap: () => _handlePick(UserRole.owner),
               ),
-
               const SizedBox(height: 14),
-
-              // ── 알바생 카드
               _RoleCard(
                 enabled: !_busy,
                 title: '알바생으로 시작',
@@ -144,21 +135,18 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 accent: const Color(0xFF0EA5E9),
                 onTap: () => _handlePick(UserRole.alba),
               ),
-
-              const Spacer(),
-
-              // ── 로딩 인디케이터
+              const SizedBox(height: 24),
               if (_busy)
                 Column(
-                  children: [
-                    const CircularProgressIndicator(
+                  children: const [
+                    CircularProgressIndicator(
                       color: Color(0xFF7C3AED),
                       strokeWidth: 2.5,
                     ),
-                    const SizedBox(height: 10),
+                    SizedBox(height: 10),
                     Text(
                       '이동 중…',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         color: Color(0xFF6B7280),
                         fontWeight: FontWeight.w500,
@@ -224,7 +212,6 @@ class _RoleCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // 아이콘 원형 배지
                 Container(
                   width: 52,
                   height: 52,
