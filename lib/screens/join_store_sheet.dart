@@ -7,6 +7,7 @@ import '../models/store.dart';
 import '../models/alba_form_models.dart';
 import '../policies/policies.dart' as pol;
 import 'subscription_screen.dart';
+import '../subscription/subscription_service.dart';
 
 class JoinStoreSheetResult {
   final String code;
@@ -125,8 +126,10 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
           return status != 'ended' && status != 'deleted';
         }).length;
 
-        // TODO: 사장님 실제 플랜 Firestore에서 읽어오기
-        final planLimit = kPlans[0].maxWorkers; // 무료 플랜 기본값
+        final ownerTier = await SubscriptionService.fetchTierForUid(ownerUid);
+        final planLimit = kPlans
+            .firstWhere((p) => p.tier == ownerTier, orElse: () => kPlans.first)
+            .maxWorkers;
 
         if (activeCount >= planLimit) {
           // 사장님에게 정원 초과 알림 기록
@@ -366,7 +369,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
 
               const SizedBox(height: 10),
               Text(
-                '코드는 대소문자를 구분하지 않아요.',
+                '코드는 대소문자를 구분해요.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,

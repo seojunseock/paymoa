@@ -4,6 +4,8 @@
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <!--  인앱 결제 권한  -->
 <uses-permission android:name="com.android.vending.BILLING"/>
+<!--  AdMob 광고 ID 권한 (Android 13+)  -->
+<uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 <application android:name="${applicationName}" android:label="페이모아" android:icon="@mipmap/ic_launcher">
 <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
 <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>

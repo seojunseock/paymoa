@@ -26,7 +26,7 @@ android {
     defaultConfig {
         applicationId = "com.paycount.app"
         minSdk = 23
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 

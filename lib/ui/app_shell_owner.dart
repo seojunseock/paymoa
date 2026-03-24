@@ -98,7 +98,9 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
             TextButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                SubscriptionSheet.show(context);
+                SubscriptionSheet.show(context,
+                    currentTier: SubscriptionService.instance.cached?.tier ??
+                        PlanTier.free);
               },
               child: const Text(
                 '구독 관리',
@@ -393,8 +395,6 @@ class _OwnerMyInfoScreenState extends State<OwnerMyInfoScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          _buildSubscriptionCard(),
-          const SizedBox(height: 12),
           _buildLaborCostCard(),
           const SizedBox(height: 16),
           _buildPolicyCard(),
@@ -712,84 +712,18 @@ class _OwnerMyInfoScreenState extends State<OwnerMyInfoScreen> {
   }
 
   void _openSubscription() {
-    SubscriptionSheet.show(context);
-  }
-
-  Widget _buildSubscriptionCard() {
-    return GestureDetector(
-      onTap: _openSubscription,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.07),
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _primary.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.workspace_premium_rounded,
-                color: _primary,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '구독 플랜',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: _textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  FutureBuilder<int>(
-                    future: _workerCountFuture,
-                    builder: (ctx, snap) {
-                      final count = snap.data ?? 0;
-                      // TODO: 실제 플랜은 Firestore 구독 정보에서 읽어오기
-                      final plan = kPlans[0]; // 무료 플랜 기본값
-                      return Text(
-                        '${plan.name}  ·  알바생 $count/${plan.maxWorkers}명',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: _textTertiary,
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 22,
-              color: _textSecondary.withOpacity(0.4),
-            ),
-          ],
-        ),
-      ),
-    );
+    final tier = SubscriptionService.instance.cached?.tier ?? PlanTier.free;
+    SubscriptionSheet.show(context, currentTier: tier);
   }
 
   Widget _buildPolicyCard() {
     return _InfoCard(children: [
+      _InfoTile(
+        icon: Icons.workspace_premium_rounded,
+        label: '구독 플랜',
+        onTap: _openSubscription,
+      ),
+      const Divider(height: 1, indent: 52),
       _InfoTile(
         icon: Icons.description_outlined,
         label: AppWords.terms,

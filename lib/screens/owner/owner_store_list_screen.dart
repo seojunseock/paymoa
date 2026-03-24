@@ -131,10 +131,12 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
 
   void _onAddStoreTap(List<Store> currentStores) {
     if (kSubscriptionEnabled) {
-      // TODO: 사용자의 실제 플랜을 Firestore에서 읽어와 한도 비교
-      final planLimit = kPlans[0].maxStores; // 무료 플랜 기본값
+      final planLimit = SubscriptionService.instance.cached?.plan.maxStores
+          ?? kPlans[0].maxStores;
       if (currentStores.length >= planLimit) {
-        SubscriptionSheet.show(context);
+        SubscriptionSheet.show(context,
+            currentTier:
+                SubscriptionService.instance.cached?.tier ?? PlanTier.free);
         return;
       }
     }

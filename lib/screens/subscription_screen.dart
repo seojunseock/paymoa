@@ -1,12 +1,13 @@
 // lib/screens/subscription_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ─────────────────────────────────────────
 // 구독 기능 플래그
 // ─────────────────────────────────────────
 /// false 로 설정 시 플랜 한도 강제 미적용
-const kSubscriptionEnabled = false;
+const kSubscriptionEnabled = true;
 
 // ─────────────────────────────────────────
 // 플랜 정의
@@ -69,28 +70,24 @@ const kPlans = [
   ),
 ];
 
-const _annualDiscountRate = 0.15;
+const _annualDiscountRate = 0.10;
 
 // ─────────────────────────────────────────
 // 공유 로직 믹스인
 // ─────────────────────────────────────────
 mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
-  bool _isAnnual = false;
+  bool _isAnnual = true; // 연간 기본 선택
   PlanTier? _selected;
   final _promoCtrl = TextEditingController();
   bool _promoLoading = false;
   String? _promoError;
   _PromoResult? _promoResult;
 
+  // 연간 10% + 프로모 할인 누적
   double get _effectiveDiscount {
-    if (_isAnnual && _promoResult != null) {
-      return _promoResult!.discountRate > _annualDiscountRate
-          ? _promoResult!.discountRate
-          : _annualDiscountRate;
-    }
-    if (_isAnnual) return _annualDiscountRate;
-    if (_promoResult != null) return _promoResult!.discountRate;
-    return 0.0;
+    final base = _isAnnual ? _annualDiscountRate : 0.0;
+    final promo = _promoResult?.discountRate ?? 0.0;
+    return (base + promo).clamp(0.0, 1.0);
   }
 
   Future<void> _applyPromo() async {
@@ -102,10 +99,10 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
       _promoResult = null;
     });
     try {
-      final result = await _validatePromoCode(code);
+      final (result, errorMsg) = await _validatePromoCode(code);
       if (!mounted) return;
       if (result == null) {
-        setState(() => _promoError = '유효하지 않은 코드예요.');
+        setState(() => _promoError = errorMsg ?? '유효하지 않은 코드예요.');
       } else {
         setState(() => _promoResult = result);
       }
@@ -117,24 +114,71 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
     }
   }
 
-  Future<_PromoResult?> _validatePromoCode(String code) async {
-    final doc = await FirebaseFirestore.instance
-        .collection('promoCodes')
-        .doc(code)
-        .get();
-    if (!doc.exists) return null;
-    final data = doc.data()!;
-    if (data['active'] == false) return null;
-    final expiresAt = data['expiresAt'];
-    if (expiresAt is Timestamp &&
-        expiresAt.toDate().isBefore(DateTime.now())) return null;
-    final pct = data['discountPercent'];
-    if (pct == null) return null;
-    return _PromoResult(
-      code: code,
-      discountRate: (pct is num ? pct.toDouble() : 0.0) / 100.0,
-      description: (data['description'] as String?) ?? '',
-    );
+  Future<(_PromoResult?, String?)> _validatePromoCode(String code) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return (null, '로그인이 필요해요.');
+
+    final db = FirebaseFirestore.instance;
+    final ref = db.collection('promoCodes').doc(code);
+    final usedByRef = ref.collection('usedBy').doc(uid);
+
+    _PromoResult? result;
+    String? errorMsg;
+
+    await db.runTransaction((tx) async {
+      final doc = await tx.get(ref);
+      if (!doc.exists) {
+        errorMsg = '유효하지 않은 코드예요.';
+        return;
+      }
+      final data = doc.data()!;
+
+      if (data['active'] == false) {
+        errorMsg = '유효하지 않은 코드예요.';
+        return;
+      }
+
+      final expiresAt = data['expiresAt'];
+      if (expiresAt is Timestamp &&
+          expiresAt.toDate().isBefore(DateTime.now())) {
+        errorMsg = '만료된 코드예요.';
+        return;
+      }
+
+      final maxUses = data['maxUses'];
+      if (maxUses != null) {
+        final usedCount = (data['usedCount'] as num?)?.toInt() ?? 0;
+        if (usedCount >= (maxUses as num).toInt()) {
+          errorMsg = '사용 횟수가 초과된 코드예요.';
+          return;
+        }
+      }
+
+      // 이 사용자가 이미 사용했는지 확인
+      final usedByDoc = await tx.get(usedByRef);
+      if (usedByDoc.exists) {
+        errorMsg = '이미 사용한 프로모션이에요.';
+        return;
+      }
+
+      final pct = data['discountPercent'];
+      if (pct == null) {
+        errorMsg = '유효하지 않은 코드예요.';
+        return;
+      }
+
+      result = _PromoResult(
+        code: code,
+        discountRate: (pct is num ? pct.toDouble() : 0.0) / 100.0,
+        description: (data['description'] as String?) ?? '',
+      );
+
+      // 사용 횟수 증가 + 사용자 기록
+      tx.update(ref, {'usedCount': FieldValue.increment(1)});
+      tx.set(usedByRef, {'usedAt': FieldValue.serverTimestamp()});
+    });
+
+    return (result, errorMsg);
   }
 
   String _won(int n) {
@@ -164,7 +208,7 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
             onTap: () => setState(() => _isAnnual = false),
           ),
           _ToggleBtn(
-            label: '연간  −15%',
+            label: '연간  −10%',
             active: _isAnnual,
             onTap: () => setState(() => _isAnnual = true),
             highlight: true,
@@ -287,7 +331,7 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
                     size: 14, color: Color(0xFF10B981)),
                 const SizedBox(width: 4),
                 Text(
-                  '${(_promoResult!.discountRate * 100).round()}% 할인 적용됨'
+                  '추가 ${(_promoResult!.discountRate * 100).round()}% 할인 적용됨'
                   '${_promoResult!.description.isNotEmpty ? "  ·  ${_promoResult!.description}" : ""}',
                   style: const TextStyle(
                     fontSize: 12,
@@ -415,7 +459,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               padding: const EdgeInsets.only(bottom: 10),
               child: Center(
                 child: Text(
-                  '연간 결제 시 15% 할인',
+                  '연간 결제 시 10% 할인',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -544,7 +588,7 @@ class _SubscriptionSheetState extends State<SubscriptionSheet>
                       padding: const EdgeInsets.only(bottom: 10),
                       child: Center(
                         child: Text(
-                          '연간 결제 시 15% 할인',
+                          '연간 결제 시 10% 할인',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,

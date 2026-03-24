@@ -296,6 +296,8 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                     onTap: () =>
                         setState(() => _ins = const pol.InsuranceFour()),
                   ),
+                  const SizedBox(height: 10),
+                  const _TaxInsEffectiveNote(),
 
                   const SizedBox(height: 24),
 
@@ -630,6 +632,43 @@ class _SurchargeTile extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 세금·보험 적용 시작일 안내 노트
+class _TaxInsEffectiveNote extends StatelessWidget {
+  const _TaxInsEffectiveNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final String label;
+    if (now.day == 1) {
+      label = '이번 달(${now.month}월 1일)부터 반영됩니다';
+    } else {
+      final nm = now.month == 12 ? 1 : now.month + 1;
+      label = '다음 달(${nm}월 1일)부터 반영됩니다';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline_rounded,
+              size: 14, color: Color(0xFF9CA3AF)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '세금·보험 변경은 $label',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+            ),
+          ),
         ],
       ),
     );

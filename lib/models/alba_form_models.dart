@@ -110,8 +110,11 @@ class AlbaFormResult {
   /// 오늘 하루만 적용 여부 (true면 오늘만, wageEffectiveFrom은 오늘)
   final bool wageOnlyToday;
 
-  /// 가산정책 적용 시작일 (null이면 오늘부터 자동)
+  /// 세금·보험 적용 시작일 (null이면 즉시)
   final DateTime? policyEffectiveFrom;
+
+  /// 가산정책 적용 시작일 - 오늘 즉시 (세금보험과 날짜 다를 때 분리)
+  final DateTime? surchargeEffectiveFrom;
 
   AlbaFormResult({
     required this.storeId,
@@ -134,5 +137,6 @@ class AlbaFormResult {
     this.wageEffectiveFrom,
     this.wageOnlyToday = false,
     this.policyEffectiveFrom,
+    this.surchargeEffectiveFrom,
   });
 }

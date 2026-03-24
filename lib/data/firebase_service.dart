@@ -763,6 +763,7 @@ class FirebaseService {
     Map<String, dynamic>? policyOverride,
     DateTime? effectiveFrom,
     DateTime? policyEffectiveFrom,
+    DateTime? surchargeEffectiveFrom, // ✅ 가산정책 전용 적용일 (세금/보험과 날짜 분리)
     Map<String, dynamic>? previousPolicyOverride,
   }) async {
     final nowServer = FieldValue.serverTimestamp();
@@ -824,11 +825,37 @@ class FirebaseService {
       'effectiveFrom': policyOverride != null ? policyDateStr : wageDateStr,
     };
 
-    final histEntries = _buildHistoryEntries(
+    // ✅ 가산정책 전용 날짜가 따로 있으면 surcharge-only 엔트리 추가 생성
+    // (세금/보험은 다음 달, 가산정책은 오늘 → 두 날짜가 다를 때만)
+    Map<String, dynamic>? surchargeOnlyEntry;
+    if (surchargeEffectiveFrom != null &&
+        policyOverride != null &&
+        policyOverride['surcharge'] != null) {
+      final surchargeDate = DateTime(
+        surchargeEffectiveFrom.year,
+        surchargeEffectiveFrom.month,
+        surchargeEffectiveFrom.day,
+      );
+      final surchargeDateStr = toYmd(surchargeDate);
+      if (surchargeDateStr != policyDateStr) {
+        surchargeOnlyEntry = {
+          'surcharge': policyOverride['surcharge'],
+          'effectiveFrom': surchargeDateStr,
+        };
+      }
+    }
+
+    var histEntries = _buildHistoryEntries(
       existingHistoryRaw: existingWorkerHistoryRaw,
       baseline: baseline,
       changed: changed.isNotEmpty ? changed : null,
     );
+    if (surchargeOnlyEntry != null) {
+      // surcharge-only 엔트리를 기존 new-entries 목록에 추가해서 날짜 순 병합
+      // (existingList는 _buildFullHistory에서 나중에 합쳐짐)
+      histEntries = _mergeHistoryEntriesByEffectiveFrom(
+          [...histEntries, surchargeOnlyEntry]);
+    }
 
     List<Map<String, dynamic>> _buildFullHistory(dynamic existingRaw) {
       final existingList = (existingRaw is List)
@@ -1823,8 +1850,6 @@ class FirebaseService {
     final Map<String, List<StoreWorker>> latestWorkersByStore = {};
     final Map<String, List<StoreSchedule>> latestSchedulesByStore = {};
 
-    const docSvc = PayrollDocumentService();
-
     DateTime dateOnlyLocal(DateTime d) => DateTime(d.year, d.month, d.day);
 
     List<Map<String, dynamic>> buildPoints() {
@@ -1843,23 +1868,29 @@ class FirebaseService {
         final schedules =
             latestSchedulesByStore[storeId] ?? const <StoreSchedule>[];
 
-        for (int offset = months - 1; offset >= 0; offset--) {
-          final dt = DateTime(now.year, now.month - offset, 1);
-          final key = '${dt.year}-${dt.month}';
+        // 시급 캐시: workerUid → 유효 시급
+        final wageCache = <String, int>{};
+        for (final w in workers) {
+          final storeWage = store.defaultHourlyWage;
+          wageCache[w.workerUid] = w.inheritFromStore
+              ? (storeWage ?? w.hourlyWage ?? 0)
+              : (w.hourlyWage ?? storeWage ?? 0);
+        }
 
-          final rows = docSvc.buildCalendarMonthDocument(
-            store: store,
-            workers: workers,
-            schedules: schedules,
-            year: dt.year,
-            month: dt.month,
-          );
-
-          int gross = 0;
-          for (final row in rows) {
-            gross += row.gross;
-          }
-          totals[key] = (totals[key] ?? 0) + gross;
+        for (final s in schedules) {
+          final key = '${s.year}-${s.month}';
+          if (!totals.containsKey(key)) continue;
+          final wage = s.overrideHourlyWage ?? (wageCache[s.workerUid] ?? 0);
+          if (wage <= 0) continue;
+          final start =
+              DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
+          var end =
+              DateTime(s.year, s.month, s.day, s.endHour, s.endMinute);
+          if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
+          final workedMin =
+              end.difference(start).inMinutes - s.breakMinutes.clamp(0, 1440);
+          if (workedMin <= 0) continue;
+          totals[key] = (totals[key] ?? 0) + (wage * workedMin / 60.0).round();
         }
       }
 
@@ -2158,6 +2189,7 @@ class FirebaseService {
     Map<String, dynamic>? previousPolicy,
     DateTime? policyEffectiveFrom,
     DateTime? wageEffectiveFrom,
+    DateTime? surchargeEffectiveFrom,
   }) async {
     final today = DateTime.now();
     final wageDateEff = _dateOnly(wageEffectiveFrom ?? today);
@@ -2217,8 +2249,24 @@ class FirebaseService {
               .map((e) => Map<String, dynamic>.from(e as Map))
               .toList()
           : <Map<String, dynamic>>[];
+
+      // 가산정책이 세금/보험과 다른 날짜(오늘)에 적용될 때 별도 이력 항목 추가
+      var allEntries = histEntries;
+      if (surchargeEffectiveFrom != null && policy != null) {
+        final surchargeDateStr =
+            _ymdStr(_dateOnly(surchargeEffectiveFrom));
+        if (surchargeDateStr != policyDateStr) {
+          final surchargeOnlyEntry = <String, dynamic>{
+            ...policy,
+            'effectiveFrom': surchargeDateStr,
+          };
+          allEntries = _mergeHistoryEntriesByEffectiveFrom(
+              [...histEntries, surchargeOnlyEntry]);
+        }
+      }
+
       data['policyHistory'] = _mergeHistoryEntriesByEffectiveFrom(
-          [...existingList, ...histEntries]);
+          [...existingList, ...allEntries]);
     }
     await _myAlbasRef(uid).doc(albaId).set(data, SetOptions(merge: true));
   }

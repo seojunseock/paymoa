@@ -192,7 +192,9 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                           ),
                           const SizedBox(width: 8),
                           GestureDetector(
-                            onTap: () => SubscriptionSheet.show(context),
+                            onTap: () => SubscriptionSheet.show(context,
+                currentTier: SubscriptionService.instance.cached?.tier ??
+                    PlanTier.free),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 5),
@@ -1565,7 +1567,9 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
       return Opacity(
         opacity: 0.4,
         child: GestureDetector(
-          onTap: () => SubscriptionSheet.show(context),
+          onTap: () => SubscriptionSheet.show(context,
+                currentTier: SubscriptionService.instance.cached?.tier ??
+                    PlanTier.free),
           child: Stack(children: [
             Container(
               decoration: BoxDecoration(

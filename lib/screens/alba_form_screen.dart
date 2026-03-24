@@ -66,6 +66,8 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   pol.SurchargePolicy? _initialSurcharge;
   bool? _initialWeeklyHoliday;
   bool? _initialWeeklyOvertime;
+  pol.TaxConfig? _initialTax;
+  pol.InsuranceConfig? _initialIns;
 
   late PayrollPolicy _payrollPolicy;
 
@@ -125,6 +127,8 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         _initialSurcharge = i.surcharge;
         _initialWeeklyHoliday = _weeklyHoliday;
         _initialWeeklyOvertime = _weeklyOvertime;
+        _initialTax = i.tax;
+        _initialIns = i.insurance;
       }
 
       _startH = i.startHour24;
@@ -437,6 +441,13 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     return b.toString();
   }
 
+  bool _taxInsChanged() {
+    if (_initialTax != null && _tax != _initialTax) return true;
+    if (_initialIns != null &&
+        _ins.runtimeType != _initialIns!.runtimeType) return true;
+    return false;
+  }
+
   DateTime _nextSunday(DateTime d) {
     final date = DateTime(d.year, d.month, d.day);
     final daysUntilSunday = (7 - date.weekday) % 7;
@@ -532,13 +543,21 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
 
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
-    final nextSunday = _nextSunday(todayDate);
+    final taxInsEffective = DateTime(todayDate.year, todayDate.month + 1, 1);
 
     final bool wageChanged =
         _isEdit && _initialWage != null && newWage != _initialWage;
-    final bool policyChanged = _isEdit && _policyChanged(effectiveSurcharge);
+    final bool surchargeChanged = _isEdit && _policyChanged(effectiveSurcharge);
+    final bool taxInsChanged = _isEdit && _taxInsChanged();
 
-    if (wageChanged || policyChanged) {
+    if (wageChanged || surchargeChanged || taxInsChanged) {
+      final lines = <String>[];
+      if (wageChanged || surchargeChanged) {
+        lines.add('시급·가산정책은 오늘(${_fmtYmdLocal(todayDate)})부터 적용됩니다.');
+      }
+      if (taxInsChanged) {
+        lines.add('세금·보험은 ${_fmtYmdLocal(taxInsEffective)}부터 적용됩니다.');
+      }
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -549,8 +568,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
             style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
           ),
           content: Text(
-            '시급 변경은 오늘(${_fmtYmdLocal(todayDate)})부터 적용됩니다.\n'
-            '세금·보험·가산정책 변경은 다음 주 시작일(${_fmtYmdLocal(nextSunday)})부터 적용됩니다.',
+            lines.join('\n'),
             style: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
           ),
           actions: [
@@ -579,7 +597,8 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     }
 
     final DateTime? wageEffectiveFrom = wageChanged ? todayDate : null;
-    final DateTime? policyEffectiveFrom = policyChanged ? nextSunday : null;
+    final DateTime? policyEffectiveFrom = taxInsChanged ? taxInsEffective : null;
+    final DateTime? surchargeEffectiveFrom = surchargeChanged ? todayDate : null;
 
     final isNewJoinFinal = !_isEdit && _storeId.isNotEmpty;
     widget.onSubmit(
@@ -604,6 +623,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         wageEffectiveFrom: wageEffectiveFrom,
         wageOnlyToday: false,
         policyEffectiveFrom: policyEffectiveFrom,
+        surchargeEffectiveFrom: surchargeEffectiveFrom,
       ),
     );
   }

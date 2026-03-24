@@ -804,6 +804,7 @@ class _AppShellState extends State<AppShell> {
                         ? res.wageEffectiveFrom
                         : null,
                 policyEffectiveFrom: res.policyEffectiveFrom,
+                surchargeEffectiveFrom: res.surchargeEffectiveFrom,
               );
             } else {
               if (res.hourlyWage != alba.hourlyWage) {
@@ -889,25 +890,44 @@ class _AppShellState extends State<AppShell> {
                 }
               }
 
+              // 가산정책 오늘 즉시 이력 항목
+              if (!isJoin &&
+                  res.surchargeEffectiveFrom != null &&
+                  res.surcharge != null) {
+                final surEff = res.surchargeEffectiveFrom!;
+                final surEntryMap = pm.buildPolicyMap(
+                  tax: res.policyEffectiveFrom != null ? tax : res.tax,
+                  insurance: res.policyEffectiveFrom != null ? ins : res.ins,
+                  surcharge: res.surcharge!,
+                  payrollPolicy: res.payrollPolicy,
+                );
+                final surEntry = PolicyHistoryEntry.fromMap({
+                  ...surEntryMap,
+                  'effectiveFrom': '${surEff.year}-'
+                      '${surEff.month.toString().padLeft(2, '0')}-'
+                      '${surEff.day.toString().padLeft(2, '0')}',
+                });
+                if (surEntry != null) newHist = newHist.append(surEntry);
+              }
+
+              // 세금·보험 다음달 이력 항목
               if (!isJoin &&
                   res.policyEffectiveFrom != null &&
                   res.surcharge != null) {
-                final pm2 = res.surcharge!;
-                final policyMap = pm.buildPolicyMap(
+                final polEff = res.policyEffectiveFrom!;
+                final policyEntryMap = pm.buildPolicyMap(
                   tax: res.tax,
                   insurance: res.ins,
-                  surcharge: pm2,
+                  surcharge: res.surcharge!,
                   payrollPolicy: res.payrollPolicy,
                 );
-                final entry = PolicyHistoryEntry.fromMap({
-                  ...policyMap,
-                  'effectiveFrom': '${res.policyEffectiveFrom!.year}-'
-                      '${res.policyEffectiveFrom!.month.toString().padLeft(2, '0')}-'
-                      '${res.policyEffectiveFrom!.day.toString().padLeft(2, '0')}',
+                final polEntry = PolicyHistoryEntry.fromMap({
+                  ...policyEntryMap,
+                  'effectiveFrom': '${polEff.year}-'
+                      '${polEff.month.toString().padLeft(2, '0')}-'
+                      '${polEff.day.toString().padLeft(2, '0')}',
                 });
-                if (entry != null) {
-                  newHist = newHist.append(entry);
-                }
+                if (polEntry != null) newHist = newHist.append(polEntry);
               }
               setState(() {
                 _overridesByAlbaId[alba.id] = (oldOv).copyWith(

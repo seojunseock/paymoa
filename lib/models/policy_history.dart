@@ -172,9 +172,26 @@ class PolicyHistory {
   }
 
   /// 편의 함수들
-  SurchargePolicy? surchargeAt(DateTime date) => entryAt(date)?.surcharge;
-  TaxConfig? taxAt(DateTime date) => entryAt(date)?.tax;
-  InsuranceConfig? insuranceAt(DateTime date) => entryAt(date)?.insurance;
+  ///
+  /// ✅ 이력이 존재하는데 조회 날짜가 첫 항목보다 이전인 경우,
+  ///    null 대신 "비활성 기본값"을 반환한다.
+  ///    → 호출처의 `?? fallback(현재 정책)` 소급 적용을 방지.
+  ///
+  /// 이력 자체가 없으면(isEmpty) null 반환 → 호출처가 현재 정책을 그대로 사용(정상).
+  SurchargePolicy? surchargeAt(DateTime date) {
+    if (_entries.isEmpty) return null;
+    return entryAt(date)?.surcharge ?? const SurchargePolicy();
+  }
+
+  TaxConfig? taxAt(DateTime date) {
+    if (_entries.isEmpty) return null;
+    return entryAt(date)?.tax ?? TaxConfig.none;
+  }
+
+  InsuranceConfig? insuranceAt(DateTime date) {
+    if (_entries.isEmpty) return null;
+    return entryAt(date)?.insurance ?? const InsuranceNone();
+  }
 
   /// ✅ 날짜별 유효 시급
   /// - 해당 날짜에 적용되는 이력 항목의 hourlyWage 반환

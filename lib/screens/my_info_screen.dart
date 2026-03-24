@@ -7,7 +7,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
-import 'subscription_screen.dart';
 
 class MyInfoMonthlyNetPoint {
   final int year;
@@ -517,22 +516,8 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     );
   }
 
-  void _openSubscription() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const SubscriptionScreen(),
-      ),
-    );
-  }
-
   Widget _buildPolicyCard() {
     return _InfoCard(children: [
-      _InfoTile(
-        icon: Icons.workspace_premium_rounded,
-        label: '구독 플랜',
-        onTap: _openSubscription,
-      ),
-      const Divider(height: 1, indent: 52),
       _InfoTile(
         icon: Icons.description_outlined,
         label: AppWords.terms,

@@ -575,7 +575,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     for (final aid in activeIds) {
       final sur = widget.getSurchargePolicy(aid);
-      if (sur == null || !sur.weeklyHolidayEnabled) continue;
+      final surchargeAtFn = widget.getSurchargeAt?.call(aid);
+
+      // policyHistory 없으면 현재 정책 기준, 있으면 날짜별로 확인하므로 일단 통과
+      if (surchargeAtFn == null && (sur == null || !sur.weeklyHolidayEnabled)) {
+        continue;
+      }
 
       final alba = _albaByIdOrDefault(aid);
       final color = cp.parseColor(alba.colorHex);
@@ -604,13 +609,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
         if (entry.value < 15 * 60) continue;
 
         final weekStart = entry.key;
+
+        // ✅ 해당 주의 날짜 기준 정책 조회 (policyHistory 반영)
+        final weekSur = surchargeAtFn?.call(weekStart) ?? sur;
+        if (weekSur == null || !weekSur.weeklyHolidayEnabled) continue;
+
         final holidayDate =
             _dateOnly(weekStart.add(const Duration(days: 6))); // 토요일 귀속
 
         if (!_isSameMonth(holidayDate, y, m)) continue;
 
-        final paidMinutes = sur.weeklyHolidayUseFixedMinutes
-            ? sur.weeklyHolidayFixedMinutes
+        final paidMinutes = weekSur.weeklyHolidayUseFixedMinutes
+            ? weekSur.weeklyHolidayFixedMinutes
             : (entry.value /
                     (weeklyWorkDays[weekStart]?.length == 0
                         ? 1
