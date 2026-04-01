@@ -9,6 +9,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 /// false 로 설정 시 플랜 한도 강제 미적용
 const kSubscriptionEnabled = true;
 
+/// false 로 설정 시 구독 UI 전체 숨김 (결제 연동 전까지 false 유지)
+const kSubscriptionVisible = false;
+
 // ─────────────────────────────────────────
 // 플랜 정의
 // ─────────────────────────────────────────
@@ -506,6 +509,7 @@ class SubscriptionSheet extends StatefulWidget {
     BuildContext context, {
     PlanTier currentTier = PlanTier.free,
   }) {
+    if (!kSubscriptionVisible) return Future.value();
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

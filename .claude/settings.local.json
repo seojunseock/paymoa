@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/dev/paycount/lib/screens/*.dart /c/dev/paycount/lib/ui/*.dart /c/dev/paycount/lib/screens/owner/*.dart)",
+      "WebSearch",
+      "WebFetch(domain:www.shoplworks.com)",
+      "WebFetch(domain:www.albam.net)",
+      "WebFetch(domain:www.wkdk.kr)",
+      "WebFetch(domain:www.newploy.net)",
+      "WebFetch(domain:support.shoplworks.com)",
+      "WebFetch(domain:www.newploy.co)",
+      "WebFetch(domain:impactflow.kr)",
+      "WebFetch(domain:www.connectfit.co.kr)",
+      "WebFetch(domain:biz.giig.app)",
+      "WebFetch(domain:www.arpayo.com)",
+      "WebFetch(domain:www.darun.io)",
+      "Bash(xargs grep:*)",
+      "Bash(flutter pub:*)",
+      "Bash(grep -v \"//.*AIza\")",
+      "Bash(ls:*)",
+      "Bash(flutter build:*)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''private:'''', d.get\\(''''private''''\\), ''''visibility:'''', d.get\\(''''visibility''''\\)\\)\")",
+      "Bash(curl -s \"https://api.github.com/users/seojunseock/repos?per_page=20\")",
+      "Bash(python -c \"import sys,json; repos=json.load\\(sys.stdin\\); [print\\(f''''{r[name]} - {private if r[private] else public}''''\\) for r in repos]\")",
+      "Bash(curl:*)"
+    ]
+  }
+}

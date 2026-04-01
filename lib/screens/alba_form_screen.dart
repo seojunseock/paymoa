@@ -13,6 +13,7 @@ import 'date_assign_sheet.dart';
 // payroll
 import '../payroll/payroll.dart';
 import 'payroll_policy_sheet.dart';
+import '../ads/ad_service.dart';
 
 class AlbaFormScreen extends StatefulWidget {
   const AlbaFormScreen({
@@ -601,30 +602,32 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     final DateTime? surchargeEffectiveFrom = surchargeChanged ? todayDate : null;
 
     final isNewJoinFinal = !_isEdit && _storeId.isNotEmpty;
-    widget.onSubmit(
-      AlbaFormResult(
-        storeId: _storeId,
-        inheritFromStore: _inheritFromStore,
-        workerName: isNewJoinFinal ? _workerNameCtrl.text.trim() : null,
-        storeName: name,
-        hourlyWage: newWage,
-        colorHex: _colorHex,
-        tax: _tax,
-        ins: _ins,
-        surcharge: effectiveSurcharge,
-        payrollPolicy: _payrollPolicy,
-        startHour24: _startH,
-        startMinute: _startM,
-        endHour24: _endH,
-        endMinute: _endM,
-        breakMinutes: _breakMin,
-        selectedDates: _selected,
-        payDay: _deriveLegacyPayDay(_payrollPolicy),
-        wageEffectiveFrom: wageEffectiveFrom,
-        wageOnlyToday: false,
-        policyEffectiveFrom: policyEffectiveFrom,
-        surchargeEffectiveFrom: surchargeEffectiveFrom,
-      ),
+    final result = AlbaFormResult(
+      storeId: _storeId,
+      inheritFromStore: _inheritFromStore,
+      workerName: isNewJoinFinal ? _workerNameCtrl.text.trim() : null,
+      storeName: name,
+      hourlyWage: newWage,
+      colorHex: _colorHex,
+      tax: _tax,
+      ins: _ins,
+      surcharge: effectiveSurcharge,
+      payrollPolicy: _payrollPolicy,
+      startHour24: _startH,
+      startMinute: _startM,
+      endHour24: _endH,
+      endMinute: _endM,
+      breakMinutes: _breakMin,
+      selectedDates: _selected,
+      payDay: _deriveLegacyPayDay(_payrollPolicy),
+      wageEffectiveFrom: wageEffectiveFrom,
+      wageOnlyToday: false,
+      policyEffectiveFrom: policyEffectiveFrom,
+      surchargeEffectiveFrom: surchargeEffectiveFrom,
+    );
+    AdService.instance.showRewardedAd(
+      onRewarded: () => widget.onSubmit(result),
+      onNotReady: () => widget.onSubmit(result),
     );
   }
 

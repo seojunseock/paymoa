@@ -26,7 +26,7 @@
 <!--  Flutter 플러그인 로딩 메타데이터  -->
 <meta-data android:name="flutterEmbedding" android:value="2"/>
 <!--  AdMob App ID  -->
-<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>
+<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-2756061286403249~2635628236"/>
 </application>
 <!--  top-level queries (Android 11+)  -->
 <queries>

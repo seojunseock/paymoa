@@ -10,6 +10,7 @@ import '../policies/policy_sheet.dart';
 import 'date_assign_sheet.dart';
 import 'work_editor_args.dart' as wargs;
 import '../ads/ad_service.dart';
+import '../services/last_work_time_service.dart';
 
 /* ───────────────── 바텀시트 열기 ───────────────── */
 
@@ -125,6 +126,10 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     final preset = widget.args.presetDate ?? DateTime.now();
     _selectedUtcDates = {DateTime.utc(preset.year, preset.month, preset.day)};
 
+    if (!_isEdit) {
+      _loadLastWorkTime(_selectedAlbaId);
+    }
+
     if (_isEdit && widget.args.scheduleId != null) {
       final s = widget.schedules.firstWhere(
         (x) => x.id == widget.args.scheduleId,
@@ -158,6 +163,18 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
         _overrideWage = s.overrideHourlyWage;
       }
     }
+  }
+
+  Future<void> _loadLastWorkTime(String albaId) async {
+    final saved = await LastWorkTimeService.load(albaId);
+    if (saved == null || !mounted) return;
+    setState(() {
+      _startH = saved.startH;
+      _startM = saved.startM;
+      _endH = saved.endH;
+      _endM = saved.endM;
+      _breakMin = saved.breakMin;
+    });
   }
 
   UICalendarAlba get _alba => widget.albas.firstWhere(
@@ -445,6 +462,14 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
         }
       }
 
+      await LastWorkTimeService.save(
+        albaId: _albaId,
+        startH: _startH,
+        startM: _startM,
+        endH: _endH,
+        endM: _endM,
+        breakMin: _breakMin,
+      );
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
@@ -534,6 +559,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                         );
                                         if (!mounted || picked == null) return;
                                         setState(() => _albaId = picked);
+                                        _loadLastWorkTime(picked);
                                       },
                               ),
                               const Divider(height: 1),

@@ -2,18 +2,21 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+// ignore_for_file: unused_field
 
 class _AdIds {
   // ── 테스트 ID ──
   static const _testBanner = 'ca-app-pub-3940256099942544/6300978111';
   static const _testRewarded = 'ca-app-pub-3940256099942544/5224354917';
+  static const _testInterstitial = 'ca-app-pub-3940256099942544/1033173712';
 
   // ── 실제 ID ──
   static const _realBannerAndroid = 'ca-app-pub-2756061286403249/1086876298';
   static const _realRewardedAndroid = 'ca-app-pub-2756061286403249/6982200803';
+  static const _realInterstitialAndroid = 'ca-app-pub-2756061286403249/5629110129';
 
   // ✅ 테스트 중: true / 출시 전: false 로 변경
-  static bool get _isTest => true;
+  static bool get _isTest => false;
 
   static String get banner {
     if (_isTest) return _testBanner;
@@ -24,6 +27,11 @@ class _AdIds {
     if (_isTest) return _testRewarded;
     return _realRewardedAndroid;
   }
+
+  static String get interstitial {
+    if (_isTest) return _testInterstitial;
+    return _realInterstitialAndroid;
+  }
 }
 
 class AdService {
@@ -32,6 +40,57 @@ class AdService {
 
   RewardedAd? _rewardedAd;
   bool _isLoading = false;
+
+  InterstitialAd? _interstitialAd;
+  bool _isInterstitialLoading = false;
+
+  void preloadInterstitialAd() {
+    if (_interstitialAd != null || _isInterstitialLoading) return;
+    _isInterstitialLoading = true;
+
+    InterstitialAd.load(
+      adUnitId: _AdIds.interstitial,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isInterstitialLoading = false;
+          debugPrint('[AdService] 인터스티셜 광고 로드 완료');
+        },
+        onAdFailedToLoad: (error) {
+          _isInterstitialLoading = false;
+          debugPrint('[AdService] 인터스티셜 광고 로드 실패: $error');
+        },
+      ),
+    );
+  }
+
+  Future<void> showInterstitialAd({VoidCallback? onDismissed}) async {
+    if (_interstitialAd == null) {
+      debugPrint('[AdService] 인터스티셜 준비 안 됨 → 스킵');
+      onDismissed?.call();
+      preloadInterstitialAd();
+      return;
+    }
+
+    _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _interstitialAd = null;
+        preloadInterstitialAd();
+        onDismissed?.call();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        ad.dispose();
+        _interstitialAd = null;
+        preloadInterstitialAd();
+        debugPrint('[AdService] 인터스티셜 표시 실패: $error');
+        onDismissed?.call();
+      },
+    );
+
+    await _interstitialAd!.show();
+  }
 
   void preloadRewardedAd() {
     if (_rewardedAd != null || _isLoading) return;

@@ -18,6 +18,7 @@ import '../models/policy_history.dart';
 
 import '../screens/alba_start_screen.dart';
 import '../screens/alba_form_screen.dart';
+import '../services/last_work_time_service.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/work_editor_args.dart' as wargs;
 import '../screens/my_info_screen.dart';
@@ -89,6 +90,9 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _subscribePolicyRestore();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AdService.instance.showInterstitialAd();
+    });
   }
 
   void _subscribePolicyRestore() {
@@ -806,6 +810,14 @@ class _AppShellState extends State<AppShell> {
                 policyEffectiveFrom: res.policyEffectiveFrom,
                 surchargeEffectiveFrom: res.surchargeEffectiveFrom,
               );
+              await LastWorkTimeService.save(
+                albaId: alba.id,
+                startH: res.startHour24,
+                startM: res.startMinute,
+                endH: res.endHour24,
+                endM: res.endMinute,
+                breakMin: res.breakMinutes,
+              );
             } else {
               if (res.hourlyWage != alba.hourlyWage) {
                 final hasEffectiveFrom =
@@ -1010,6 +1022,14 @@ class _AppShellState extends State<AppShell> {
               surcharge: res.surcharge,
               payrollPolicy: res.payrollPolicy,
             ),
+          );
+          await LastWorkTimeService.save(
+            albaId: albaId,
+            startH: res.startHour24,
+            startM: res.startMinute,
+            endH: res.endHour24,
+            endM: res.endMinute,
+            breakMin: res.breakMinutes,
           );
 
           for (final dt in res.selectedDates) {

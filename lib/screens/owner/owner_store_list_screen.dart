@@ -13,6 +13,7 @@ import '../../payroll/payroll.dart';
 import '../../payroll/payroll_policy_mapper.dart' as ppm;
 import '../subscription_screen.dart';
 import '../../subscription/subscription_service.dart';
+import '../../ads/ad_service.dart';
 
 /* ─── helpers ─────────────────────────────────── */
 String _comma(int n) {
@@ -130,7 +131,7 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
   }
 
   void _onAddStoreTap(List<Store> currentStores) {
-    if (kSubscriptionEnabled) {
+    if (kSubscriptionEnabled && kSubscriptionVisible) {
       final planLimit = SubscriptionService.instance.cached?.plan.maxStores
           ?? kPlans[0].maxStores;
       if (currentStores.length >= planLimit) {
@@ -251,8 +252,24 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
                         onEdit: () =>
                             AppNav.openOwnerStoreEdit(context: context, store: s),
                         onDelete: () => _confirmDelete(s),
-                        onTap: () => AppNav.openOwnerStoreDetail(
-                            context: context, store: s),
+                        onTap: () {
+                          final tier = SubscriptionService.instance.cached?.tier;
+                          final isPaid = tier != null && tier != PlanTier.free;
+                          if (isPaid) {
+                            AppNav.openOwnerStoreDetail(context: context, store: s);
+                          } else {
+                            AdService.instance.showRewardedAd(
+                              onRewarded: () {
+                                if (!context.mounted) return;
+                                AppNav.openOwnerStoreDetail(context: context, store: s);
+                              },
+                              onNotReady: () {
+                                if (!context.mounted) return;
+                                AppNav.openOwnerStoreDetail(context: context, store: s);
+                              },
+                            );
+                          }
+                        },
                       ),
                     )),
                 // 잠긴 매장

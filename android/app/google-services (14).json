@@ -1,0 +1,62 @@
+{
+  "project_info": {
+    "project_number": "203699249513",
+    "project_id": "paymoa-b6415",
+    "storage_bucket": "paymoa-b6415.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:203699249513:android:5870340ee95f03efcb9df8",
+        "android_client_info": {
+          "package_name": "com.paycount.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "203699249513-1qa606bn7na40g2nkv4ja2kigb73bcqt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paycount.app",
+            "certificate_hash": "cb3de8746e692a72f6b12bfdc12dc79fd622747a"
+          }
+        },
+        {
+          "client_id": "203699249513-qq1ejktvja7jodlbhjut6t3haobfthv8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paycount.app",
+            "certificate_hash": "3071398c341078cb390cd12e2123db835b75d314"
+          }
+        },
+        {
+          "client_id": "203699249513-f0e5l49ijia9huf7h7v4r4dqvm8skohf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBSF73AopudeiR9jwFjbIDinb8Xi9-wdLk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "203699249513-f0e5l49ijia9huf7h7v4r4dqvm8skohf.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "203699249513-mepe84u85a50dfvcvcf10m0bjjjf9rn3.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.paycount.ap"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

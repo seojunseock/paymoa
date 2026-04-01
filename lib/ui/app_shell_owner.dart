@@ -41,6 +41,9 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
   void initState() {
     super.initState();
     _initSubscription();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AdService.instance.showInterstitialAd();
+    });
   }
 
   Future<void> _initSubscription() async {
@@ -718,12 +721,14 @@ class _OwnerMyInfoScreenState extends State<OwnerMyInfoScreen> {
 
   Widget _buildPolicyCard() {
     return _InfoCard(children: [
-      _InfoTile(
-        icon: Icons.workspace_premium_rounded,
-        label: '구독 플랜',
-        onTap: _openSubscription,
-      ),
-      const Divider(height: 1, indent: 52),
+      if (kSubscriptionVisible) ...[
+        _InfoTile(
+          icon: Icons.workspace_premium_rounded,
+          label: '구독 플랜',
+          onTap: _openSubscription,
+        ),
+        const Divider(height: 1, indent: 52),
+      ],
       _InfoTile(
         icon: Icons.description_outlined,
         label: AppWords.terms,
