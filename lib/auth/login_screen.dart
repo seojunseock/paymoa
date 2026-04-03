@@ -156,6 +156,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         const Spacer(),
+                        if (isIOS) ...[
+                          _AppleLoginButton(
+                            loading: _loading && _loadingProvider == 'apple',
+                            onTap: () => _login('apple'),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         _KakaoLoginButton(
                           loading: _loading && _loadingProvider == 'kakao',
                           onTap: () => _login('kakao'),
@@ -165,13 +172,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           loading: _loading && _loadingProvider == 'google',
                           onTap: () => _login('google'),
                         ),
-                        if (isIOS) ...[
-                          const SizedBox(height: 14),
-                          _AppleLoginButton(
-                            loading: _loading && _loadingProvider == 'apple',
-                            onTap: () => _login('apple'),
-                          ),
-                        ],
                         const SizedBox(height: 24),
                         Wrap(
                           alignment: WrapAlignment.center,
