@@ -42,6 +42,8 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 
 	<!-- 성능 최적화(신형 기기 프레임 제한 해제) -->
@@ -53,7 +55,7 @@
 
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~3347511713</string>
+	<string>ca-app-pub-2756061286403249~2635628236</string>
 
 	<!-- ✅ 카카오 앱 키 -->
 	<key>KAKAO_APP_KEY</key>
