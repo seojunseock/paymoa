@@ -53,6 +53,10 @@
 	<!-- 알림: 로컬 알림은 별도 UsageDescription 키가 필요하지 않습니다.
 	     권한 요청은 런타임(DarwinInitializationSettings)에서 수행됩니다. -->
 
+	<!-- 암호화 수출 규정: 표준 암호화만 사용 (HTTPS/TLS), 별도 수출 허가 불필요 -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-2756061286403249~2635628236</string>
