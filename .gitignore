@@ -90,7 +90,6 @@ web/.dart_tool/
 .env.*
 *.env
 *.secrets
-lib/firebase_options.dart
 !lib/firebase_options.sample.dart
 
 # -----------------------------
