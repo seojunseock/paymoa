@@ -40,7 +40,7 @@ android/**/generated/
 android/key.properties
 
 # Firebase (Android)
-android/app/google-services.json
+# android/app/google-services.json  ← Codemagic 빌드를 위해 포함
 
 # -----------------------------
 # iOS
@@ -55,7 +55,7 @@ ios/Pods/
 ios/Podfile.lock
 
 # Firebase (iOS)
-ios/Runner/GoogleService-Info.plist
+# ios/Runner/GoogleService-Info.plist  ← Codemagic 빌드를 위해 포함
 
 # -----------------------------
 # macOS
