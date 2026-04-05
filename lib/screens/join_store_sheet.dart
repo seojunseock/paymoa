@@ -51,7 +51,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
     super.dispose();
   }
 
-  String _normalizeCode(String s) => s.trim().replaceAll(' ', '').toUpperCase();
+  String _normalizeCode(String s) => s.trim().replaceAll(' ', '');
 
   int? _toInt(dynamic v) {
     if (v == null) return null;
