@@ -51,7 +51,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
     super.dispose();
   }
 
-  String _normalizeCode(String s) => s.trim().replaceAll(' ', '');
+  String _normalizeCode(String s) => s.trim().replaceAll(' ', '').toUpperCase();
 
   int? _toInt(dynamic v) {
     if (v == null) return null;
@@ -325,7 +325,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
                       enableSuggestions: false,
                       textCapitalization: TextCapitalization.none,
                       decoration: InputDecoration(
-                        hintText: '예) MJ983N7A',
+                        hintText: '예) AB3K',
                         filled: true,
                         fillColor: theme.colorScheme.surface,
                         border: OutlineInputBorder(
@@ -374,7 +374,7 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
 
               const SizedBox(height: 10),
               Text(
-                '코드는 대소문자를 구분해요.',
+                '코드는 영문 대문자와 숫자로 이루어져 있어요.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,

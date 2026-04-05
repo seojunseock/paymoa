@@ -707,7 +707,7 @@ class FirebaseService {
 
   /// ✅ 중복 없는 초대 코드 생성
   Future<String> _generateUniqueStoreCode() async {
-    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
     final r = Random.secure();
 
     String gen() {
