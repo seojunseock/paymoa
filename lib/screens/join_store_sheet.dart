@@ -111,8 +111,8 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
       final name =
           (storeName != null && storeName.isNotEmpty) ? storeName : '매장';
 
-      // ── 정원 초과 체크 ──────────────────────────────────────────
-      {
+      // ── 정원 초과 체크 (구독 활성화 시에만) ─────────────────────
+      if (kSubscriptionVisible && kSubscriptionEnabled) {
         final workersSnap = await db
             .collection('users')
             .doc(ownerUid)
@@ -126,18 +126,12 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
           return status != 'ended' && status != 'deleted';
         }).length;
 
-        int planLimit;
-        if (kSubscriptionVisible && kSubscriptionEnabled) {
-          final ownerTier = await SubscriptionService.fetchTierForUid(ownerUid);
-          planLimit = kPlans
-              .firstWhere((p) => p.tier == ownerTier, orElse: () => kPlans.first)
-              .maxWorkers;
-        } else {
-          planLimit = 30; // 구독 출시 전 하드캡
-        }
+        final ownerTier = await SubscriptionService.fetchTierForUid(ownerUid);
+        final planLimit = kPlans
+            .firstWhere((p) => p.tier == ownerTier, orElse: () => kPlans.first)
+            .maxWorkers;
 
         if (activeCount >= planLimit) {
-          // 사장님에게 정원 초과 알림 기록
           await db
               .collection('users')
               .doc(ownerUid)
