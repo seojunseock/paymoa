@@ -167,7 +167,7 @@ pol.SurchargePolicy surchargePolicyFromAny(dynamic raw) {
     );
 
     final weeklyHolidayUseFixedMinutes =
-        _toBool(m['weeklyHolidayUseFixedMinutes']) ?? true;
+        _toBool(m['weeklyHolidayUseFixedMinutes']) ?? false;
 
     final weeklyHolidayFixedMinutes = _clampInt(
       _toInt(m['weeklyHolidayFixedMinutes']) ?? (8 * 60),

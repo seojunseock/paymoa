@@ -632,7 +632,7 @@ class PayrollDocumentService {
           currPolicy.weeklyHolidayUseFixedMinutes) {
         out.add(currPolicy.weeklyHolidayUseFixedMinutes
             ? '주휴 고정시간 적용'
-            : '주휴 평균시간 적용');
+            : '주휴 비례식 적용');
       } else if (currPolicy.weeklyHolidayUseFixedMinutes &&
           prevPolicy.weeklyHolidayFixedMinutes !=
               currPolicy.weeklyHolidayFixedMinutes) {

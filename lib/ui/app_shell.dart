@@ -903,14 +903,14 @@ class _AppShellState extends State<AppShell> {
               }
 
               // 가산정책 오늘 즉시 이력 항목
-              if (!isJoin &&
-                  res.surchargeEffectiveFrom != null &&
-                  res.surcharge != null) {
+              if (!isJoin && res.surchargeEffectiveFrom != null) {
                 final surEff = res.surchargeEffectiveFrom!;
+                final effectiveSur =
+                    res.surcharge ?? const pol.SurchargePolicy();
                 final surEntryMap = pm.buildPolicyMap(
                   tax: res.policyEffectiveFrom != null ? tax : res.tax,
                   insurance: res.policyEffectiveFrom != null ? ins : res.ins,
-                  surcharge: res.surcharge!,
+                  surcharge: effectiveSur,
                   payrollPolicy: res.payrollPolicy,
                 );
                 final surEntry = PolicyHistoryEntry.fromMap({
@@ -923,14 +923,14 @@ class _AppShellState extends State<AppShell> {
               }
 
               // 세금·보험 다음달 이력 항목
-              if (!isJoin &&
-                  res.policyEffectiveFrom != null &&
-                  res.surcharge != null) {
+              if (!isJoin && res.policyEffectiveFrom != null) {
                 final polEff = res.policyEffectiveFrom!;
+                final effectiveSur =
+                    res.surcharge ?? const pol.SurchargePolicy();
                 final policyEntryMap = pm.buildPolicyMap(
                   tax: res.tax,
                   insurance: res.ins,
-                  surcharge: res.surcharge!,
+                  surcharge: effectiveSur,
                   payrollPolicy: res.payrollPolicy,
                 );
                 final polEntry = PolicyHistoryEntry.fromMap({

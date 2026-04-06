@@ -73,10 +73,10 @@ class SurchargePolicy {
   final int weeklyHolidayWeekday;
 
   /// ✅ 주휴수당 시간 계산 방식
-  /// - true : fixedMinutes(기본 480=8시간)로 지급
-  /// - false: 그 주 실제 근로일수로 나눈 "평균 1일 근로시간" 근사
+  /// - true : fixedMinutes(고정 분)으로 지급
+  /// - false: 비례식 (주근무시간/40)×8h → 최대 8h 상한 (업계 표준, 기본값)
   final bool weeklyHolidayUseFixedMinutes;
-  final int weeklyHolidayFixedMinutes; // 기본 480
+  final int weeklyHolidayFixedMinutes; // 고정 시 사용 (기본 480 = 8시간)
 
   // ── 연장/야간/휴일 가산 ──────────────
   final bool overtimeEnabled;
@@ -104,7 +104,7 @@ class SurchargePolicy {
     // weekly holiday
     this.weeklyHolidayEnabled = false,
     this.weeklyHolidayWeekday = DateTime.sunday,
-    this.weeklyHolidayUseFixedMinutes = true,
+    this.weeklyHolidayUseFixedMinutes = false,
     this.weeklyHolidayFixedMinutes = 8 * 60,
 
     // overtime

@@ -621,11 +621,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
         final paidMinutes = weekSur.weeklyHolidayUseFixedMinutes
             ? weekSur.weeklyHolidayFixedMinutes
-            : (entry.value /
-                    (weeklyWorkDays[weekStart]?.length == 0
-                        ? 1
-                        : weeklyWorkDays[weekStart]!.length))
-                .round();
+            : (entry.value * 8 / 40).round().clamp(0, 8 * 60);
 
         final wage = widget.wageAt?.call(aid, holidayDate) ?? alba.hourlyWage;
         final juhuPay = (wage * (paidMinutes / 60.0)).round();

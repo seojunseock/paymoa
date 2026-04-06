@@ -334,9 +334,8 @@ int _weeklyHolidayPaidMinutes({
     return max(0, policy.weeklyHolidayFixedMinutes);
   }
 
-  // 근사(실무용): “그 주 주휴 카운트 대상 근로일수”로 나눈 평균 1일 근로시간
-  final days = max(1, weeklyWorkDays.length);
-  return max(0, (weeklyWorkedMinutes / days).round());
+  // 비례식: (주 근무시간 / 40h) × 8h, 최대 8h 상한 (알바몬·알바천국 업계 표준)
+  return min(8 * 60, (weeklyWorkedMinutes * 8 / 40).round());
 }
 
 /* ─────────────────────────────

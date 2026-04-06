@@ -178,10 +178,9 @@ class PayrollEngine {
           ? (overrides.reduce((a, b) => a + b) / overrides.length).round()
           : (wageAt?.call(alba.id, segmentStart) ?? alba.hourlyWage);
 
-      final days = max(1, weeklyHolidayWorkDays[segmentStart]?.length ?? 1);
       final paidMinutes = weekPolicy.weeklyHolidayUseFixedMinutes
           ? weekPolicy.weeklyHolidayFixedMinutes
-          : (mins / days).round();
+          : min(8 * 60, (mins * 8 / 40).round());
 
       gross += (refWage * (paidMinutes / 60)).round();
     });
