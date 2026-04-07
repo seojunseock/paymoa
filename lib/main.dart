@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'ads/ad_service.dart';
 
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
@@ -33,6 +34,11 @@ Future<void> main() async {
     await MobileAds.instance.initialize();
     AdService.instance.preloadRewardedAd();
     AdService.instance.preloadInterstitialAd(autoShow: true);
+
+    // RevenueCat 초기화
+    await Purchases.configure(
+      PurchasesConfiguration('goog_rktGmHUQOMvyZPNdOLnEHHzcgrx'),
+    );
 
     await initializeDateFormatting('ko_KR', null);
 
