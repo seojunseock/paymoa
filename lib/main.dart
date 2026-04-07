@@ -32,7 +32,7 @@ Future<void> main() async {
 
     await MobileAds.instance.initialize();
     AdService.instance.preloadRewardedAd();
-    AdService.instance.preloadInterstitialAd();
+    AdService.instance.preloadInterstitialAd(autoShow: true);
 
     await initializeDateFormatting('ko_KR', null);
 

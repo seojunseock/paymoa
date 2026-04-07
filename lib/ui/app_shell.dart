@@ -90,9 +90,24 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _subscribePolicyRestore();
+    _loadAdFreeStatus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AdService.instance.showInterstitialAd();
     });
+  }
+
+  Future<void> _loadAdFreeStatus() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    if (!mounted) return;
+    final ts = doc.data()?['adFreeUntil'];
+    if (ts is Timestamp) {
+      final dt = ts.toDate();
+      if (dt.isAfter(DateTime.now())) {
+        AdService.instance.setAdFreeUntil(dt);
+      }
+    }
   }
 
   void _subscribePolicyRestore() {

@@ -43,10 +43,21 @@ class AdService {
 
   InterstitialAd? _interstitialAd;
   bool _isInterstitialLoading = false;
+  bool _interstitialPendingShow = false; // 로드 완료 즉시 표시 플래그
 
-  void preloadInterstitialAd() {
+  DateTime? _adFreeUntil;
+
+  bool get isAdFree =>
+      _adFreeUntil != null && _adFreeUntil!.isAfter(DateTime.now());
+
+  void setAdFreeUntil(DateTime? dt) {
+    _adFreeUntil = dt;
+  }
+
+  void preloadInterstitialAd({bool autoShow = false}) {
     if (_interstitialAd != null || _isInterstitialLoading) return;
     _isInterstitialLoading = true;
+    if (autoShow) _interstitialPendingShow = true;
 
     InterstitialAd.load(
       adUnitId: _AdIds.interstitial,
@@ -56,9 +67,14 @@ class AdService {
           _interstitialAd = ad;
           _isInterstitialLoading = false;
           debugPrint('[AdService] 인터스티셜 광고 로드 완료');
+          if (_interstitialPendingShow) {
+            _interstitialPendingShow = false;
+            showInterstitialAd();
+          }
         },
         onAdFailedToLoad: (error) {
           _isInterstitialLoading = false;
+          _interstitialPendingShow = false;
           debugPrint('[AdService] 인터스티셜 광고 로드 실패: $error');
         },
       ),
@@ -66,6 +82,11 @@ class AdService {
   }
 
   Future<void> showInterstitialAd({VoidCallback? onDismissed}) async {
+    if (isAdFree) {
+      debugPrint('[AdService] 광고 면제 기간 → 인터스티셜 스킵');
+      onDismissed?.call();
+      return;
+    }
     if (_interstitialAd == null) {
       debugPrint('[AdService] 인터스티셜 준비 안 됨 → 스킵');
       onDismissed?.call();
@@ -118,6 +139,11 @@ class AdService {
     VoidCallback? onDismissed,
     VoidCallback? onNotReady,
   }) async {
+    if (isAdFree) {
+      debugPrint('[AdService] 광고 면제 기간 → 리워드 스킵, 바로 실행');
+      onRewarded();
+      return;
+    }
     if (_rewardedAd == null) {
       debugPrint('[AdService] 광고 준비 안 됨 → 즉시 실행');
       onNotReady?.call();
