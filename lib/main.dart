@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'dart:io';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'ads/ad_service.dart';
 
@@ -37,7 +38,11 @@ Future<void> main() async {
 
     // RevenueCat 초기화
     await Purchases.configure(
-      PurchasesConfiguration('goog_rktGmHUQOMvyZPNdOLnEHHzcgrx'),
+      PurchasesConfiguration(
+        Platform.isIOS
+          ? 'test_ulrHfEoQqYaQNcAdPcngZOunQOS'
+          : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
+      ),
     );
 
     await initializeDateFormatting('ko_KR', null);
