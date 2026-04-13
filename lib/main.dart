@@ -260,6 +260,10 @@ class _SafeBootApp extends StatelessWidget {
           if (initSnap.connectionState != ConnectionState.done) {
             return const _SplashScreen();
           }
+          // 초기화 실패 시: 검은 화면 대신 스플래시 유지
+          if (initSnap.hasError) {
+            return const _SplashScreen();
+          }
           // 초기화 완료 후: 인증 상태 감지
           return StreamBuilder<User?>(
             stream: FirebaseAuth.instance.authStateChanges(),

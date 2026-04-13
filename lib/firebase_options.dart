@@ -16,10 +16,7 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -41,6 +38,15 @@ class DefaultFirebaseOptions {
         );
     }
   }
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyALgZZ4h8EfomEPewwRnfZa3yLWV6Y6lfI',
+    appId: '1:203699249513:ios:2bb681301e328726cb9df8',
+    messagingSenderId: '203699249513',
+    projectId: 'paymoa-b6415',
+    storageBucket: 'paymoa-b6415.firebasestorage.app',
+    iosBundleId: 'com.paycount.app',
+  );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBSF73AopudeiR9jwFjbIDinb8Xi9-wdLk',
