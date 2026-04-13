@@ -22,18 +22,26 @@ bool _fatalHandling = false; // ✅ 에러 처리 중복/무한루프 방지
 bool _fatalDialogShowing = false; // ✅ 다이얼로그 중복 방지
 
 // Firebase + 날짜 초기화를 한 번만 실행하는 Future
-// _SafeBootApp 내 FutureBuilder가 이걸 기다린다
+// 완료 시 allowFirstFrame() 호출 → iOS 런치 스크린 해제
 final Future<void> _appInitFuture = Future(() async {
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  await initializeDateFormatting('ko_KR', null);
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    await initializeDateFormatting('ko_KR', null);
+  } finally {
+    // 성공/실패 상관없이 반드시 해제 (안 하면 런치 스크린이 영원히 유지됨)
+    WidgetsBinding.instance.allowFirstFrame();
+  }
 });
 
 Future<void> main() async {
-  runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
+  // deferFirstFrame: iOS 런치 스크린을 Firebase 초기화 완료까지 잠금
+  // flutter_native_splash 패키지가 내부적으로 쓰는 공식 Flutter 메커니즘
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  binding.deferFirstFrame();
 
+  runZonedGuarded(() async {
     // 카카오 SDK 초기화 (네이티브 앱 키)
     KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
 
@@ -46,8 +54,6 @@ Future<void> main() async {
       );
     };
 
-    // runApp을 즉시 호출 → 검은 화면 방지
-    // Firebase 초기화는 _SafeBootApp 내부 FutureBuilder에서 기다림
     runApp(const _SafeBootApp());
 
     // AdMob·RevenueCat은 백그라운드에서 초기화 (느려도 화면 안 막힘)
