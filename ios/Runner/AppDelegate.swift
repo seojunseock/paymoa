@@ -10,19 +10,17 @@ import UIKit
     GeneratedPluginRegistrant.register(with: self)
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
-    // window 배경 흰색 (기본 방어)
+    // window 배경 흰색 + 명시적으로 foreground 올리기 (타이밍 문제 방지)
     window?.backgroundColor = UIColor.white
+    window?.makeKeyAndVisible()
 
     if let flutterVC = window?.rootViewController as? FlutterViewController {
       flutterVC.view.backgroundColor = UIColor.white
 
-      // Metal(GPU) 렌더링 레이어는 backgroundColor로 제어 불가.
-      // splashScreenView = Metal 레이어 위에 덮이는 흰색 뷰.
-      // Flutter가 첫 프레임을 그리면 자동으로 제거됨.
-      let splash = UIView(frame: flutterVC.view.bounds)
-      splash.backgroundColor = UIColor.white
-      splash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-      flutterVC.splashScreenView = splash
+      // LaunchScreen.storyboard를 splashScreenView로 로드
+      // Metal 레이어 위에 덮여서 Flutter 첫 프레임까지 표시됨
+      // Flutter가 첫 프레임 렌더링 완료 시 자동 제거
+      flutterVC.loadDefaultSplashScreenView()
     }
 
     return result
