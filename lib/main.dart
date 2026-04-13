@@ -96,6 +96,7 @@ class _SafeBootApp extends StatelessWidget {
       navigatorKey: _navKey,
       title: 'Paymoa',
       debugShowCheckedModeBanner: false,
+      color: Colors.white, // 앱 전환 시 배경색 (검은 화면 방지)
       // ✅ DatePicker 한국어 및 Material Localization 설정
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
