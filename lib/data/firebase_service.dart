@@ -743,7 +743,7 @@ class FirebaseService {
       q = q.where('status', isEqualTo: 'active');
     }
 
-    return q.orderBy('joinedAt', descending: true).snapshots().map((snap) {
+    return q.orderBy('joinedAt', descending: false).snapshots().map((snap) {
       return snap.docs
           .map((d) => StoreWorker.fromJson(d.data()))
           .toList(growable: false);

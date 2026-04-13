@@ -21,6 +21,15 @@ final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 bool _fatalHandling = false; // ✅ 에러 처리 중복/무한루프 방지
 bool _fatalDialogShowing = false; // ✅ 다이얼로그 중복 방지
 
+// Firebase + 날짜 초기화를 한 번만 실행하는 Future
+// _SafeBootApp 내 FutureBuilder가 이걸 기다린다
+final Future<void> _appInitFuture = Future(() async {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  await initializeDateFormatting('ko_KR', null);
+});
+
 Future<void> main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -28,15 +37,8 @@ Future<void> main() async {
     // 카카오 SDK 초기화 (네이티브 앱 키)
     KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
 
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-
-    await initializeDateFormatting('ko_KR', null);
-
     FlutterError.onError = (details) {
       FlutterError.dumpErrorToConsole(details);
-
       _showFatalSafely(
         title: 'FlutterError',
         message: details.exceptionAsString(),
@@ -44,7 +46,8 @@ Future<void> main() async {
       );
     };
 
-    // runApp을 먼저 호출해 화면을 즉시 표시
+    // runApp을 즉시 호출 → 검은 화면 방지
+    // Firebase 초기화는 _SafeBootApp 내부 FutureBuilder에서 기다림
     runApp(const _SafeBootApp());
 
     // AdMob·RevenueCat은 백그라운드에서 초기화 (느려도 화면 안 막힘)
@@ -243,13 +246,23 @@ class _SafeBootApp extends StatelessWidget {
         '/terms': (_) => const TermsScreen(),
         '/privacy': (_) => const PrivacyPolicyScreen(),
       },
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
+      home: FutureBuilder<void>(
+        future: _appInitFuture,
+        builder: (context, initSnap) {
+          // Firebase 초기화 완료 전: 스플래시 표시
+          if (initSnap.connectionState != ConnectionState.done) {
             return const _SplashScreen();
           }
-          return const RoleGate();
+          // 초기화 완료 후: 인증 상태 감지
+          return StreamBuilder<User?>(
+            stream: FirebaseAuth.instance.authStateChanges(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const _SplashScreen();
+              }
+              return const RoleGate();
+            },
+          );
         },
       ),
     );

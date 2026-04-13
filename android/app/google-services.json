@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "203699249513-8f5pvm47v7ehk1632grls75feej1fsr7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paycount.app",
+            "certificate_hash": "aea623fbae8e65f57dd8428f57956900400b4438"
+          }
+        },
+        {
           "client_id": "203699249513-qq1ejktvja7jodlbhjut6t3haobfthv8.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

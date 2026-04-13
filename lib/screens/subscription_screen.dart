@@ -1,7 +1,11 @@
 // lib/screens/subscription_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+
+import '../subscription/subscription_service.dart';
 
 // ─────────────────────────────────────────
 // 구독 기능 플래그
@@ -46,7 +50,7 @@ const kPlans = [
     tier: PlanTier.free,
     name: '무료',
     maxStores: 1,
-    maxWorkers: 4,
+    maxWorkers: 5,
     monthlyPrice: 0,
   ),
   PlanInfo(
@@ -61,7 +65,7 @@ const kPlans = [
     name: '프로',
     maxStores: 2,
     maxWorkers: 25,
-    monthlyPrice: 9000,
+    monthlyPrice: 10000,
     badge: '추천',
   ),
   PlanInfo(
@@ -85,6 +89,62 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
   bool _promoLoading = false;
   String? _promoError;
   _PromoResult? _promoResult;
+  bool _purchasing = false;
+
+  String _packageIdForTier(PlanTier tier) {
+    switch (tier) {
+      case PlanTier.classic: return 'monthly_classic';
+      case PlanTier.pro: return 'monthly_pro';
+      case PlanTier.business: return 'monthly_business';
+      default: return 'monthly_classic';
+    }
+  }
+
+  Future<void> _purchase() async {
+    final tier = _selected;
+    if (tier == null || tier == PlanTier.free) return;
+
+    setState(() => _purchasing = true);
+    try {
+      final offerings = await Purchases.getOfferings();
+      final offering = offerings.current;
+      if (offering == null) throw Exception('오퍼링을 불러올 수 없어요.');
+
+      final packageId = _packageIdForTier(tier);
+      final package = offering.availablePackages.firstWhere(
+        (p) => p.identifier == packageId,
+        orElse: () => throw Exception('플랜 정보를 찾을 수 없어요.'),
+      );
+
+      await Purchases.purchase(PurchaseParams.package(package));
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) await SubscriptionService.instance.refresh(uid);
+
+      if (mounted) {
+        Navigator.of(context).pop(true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('구독이 완료되었어요!')),
+        );
+      }
+    } on PlatformException catch (e) {
+      final errorCode = PurchasesErrorHelper.getErrorCode(e);
+      if (errorCode == PurchasesErrorCode.purchaseCancelledError) return;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('결제 오류가 발생했어요. ($errorCode)')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _purchasing = false);
+    }
+  }
 
   // 연간 10% + 프로모 할인 누적
   double get _effectiveDiscount {
@@ -350,6 +410,35 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
     );
   }
 
+  Widget _buildRefundNotice() {
+    return const Padding(
+      padding: EdgeInsets.only(top: 12),
+      child: Column(
+        children: [
+          Text(
+            '48시간 이내 Google Play 전액 환불 · 이후 7일 내 차감 환불',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF9CA3AF),
+            ),
+          ),
+          SizedBox(height: 2),
+          Text(
+            '자세한 사항은 이용약관을 참고 바랍니다.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF9CA3AF),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSubscribeButton(PlanTier currentTier) {
     final plan = kPlans.firstWhere((p) => p.tier == _selected,
         orElse: () => kPlans.first);
@@ -372,14 +461,9 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
       width: double.infinity,
       height: 54,
       child: FilledButton(
-        onPressed: isCurrent
+        onPressed: (isCurrent || _purchasing)
             ? null
-            : () {
-                // TODO: 실제 결제 연동
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('결제 기능은 곧 추가될 예정이에요.')),
-                );
-              },
+            : _purchase,
         style: FilledButton.styleFrom(
           backgroundColor:
               isCurrent ? const Color(0xFFE5E7EB) : const Color(0xFF7C3AED),
@@ -388,13 +472,20 @@ mixin _SubscriptionLogic<T extends StatefulWidget> on State<T> {
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14)),
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        child: _purchasing
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.5, color: Colors.white),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
       ),
     );
   }
@@ -487,6 +578,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
           _buildPromoSection(),
           const SizedBox(height: 24),
           _buildSubscribeButton(widget.currentTier),
+          _buildRefundNotice(),
         ],
       ),
     );
@@ -617,6 +709,7 @@ class _SubscriptionSheetState extends State<SubscriptionSheet>
                   _buildPromoSection(),
                   const SizedBox(height: 24),
                   _buildSubscribeButton(widget.currentTier),
+                  _buildRefundNotice(),
                 ],
               ),
             ),

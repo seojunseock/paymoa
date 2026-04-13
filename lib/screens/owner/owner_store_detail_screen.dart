@@ -154,66 +154,37 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
               final alive = allWorkers.map((w) => w.workerUid).toSet();
               _payCache.removeWhere((k, _) => !alive.contains(k));
 
-              // ── 구독 만료 시 알바생 한도 계산 ──────────────────
+              // ── 구독 플랜 알바생 한도 계산 ──────────────────
               final subInfo = SubscriptionService.instance.cached;
               final isExpiredPlan = kSubscriptionEnabled &&
                   subInfo?.status == SubscriptionStatus.expired;
               final storeIsReadOnly = widget.isReadOnly;
-              // 한도는 만료 시에만 적용
-              final workerLimit =
-                  isExpiredPlan ? (subInfo?.plan.maxWorkers ?? 999) : 999;
+              // kSubscriptionVisible = true 시 플랜 한도 적용 (유예기간은 제한 없음)
+              final isGracePlan = subInfo?.status == SubscriptionStatus.gracePeriod;
+              final workerLimit = (kSubscriptionEnabled && kSubscriptionVisible && !isGracePlan)
+                  ? (subInfo?.plan.maxWorkers ?? 999)
+                  : 999;
               // ────────────────────────────────────────────────
 
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 children: [
-                  // ── 구독 만료 배너 ──────────────────────────
+                  // ── 구독 배너 ──────────────────────────
                   if (isExpiredPlan || storeIsReadOnly) ...[
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.lock_outline_rounded,
-                              size: 16, color: Color(0xFFF43F5E)),
-                          const SizedBox(width: 8),
-                          const Expanded(
-                            child: Text(
-                              '구독이 만료됐어요. 일부 기능이 제한됩니다.',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFFF43F5E)),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => SubscriptionSheet.show(context,
-                currentTier: SubscriptionService.instance.cached?.tier ??
-                    PlanTier.free),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF43F5E),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text(
-                                '플랜 업그레이드',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                    _WorkerBanner(
+                      message: '구독이 만료됐어요. 일부 기능이 제한됩니다.',
+                      color: const Color(0xFFFEE2E2),
+                      textColor: const Color(0xFFF43F5E),
+                      onUpgrade: () => SubscriptionSheet.show(context,
+                          currentTier: SubscriptionService.instance.cached?.tier ?? PlanTier.free),
+                    ),
+                  ] else if (kSubscriptionEnabled && kSubscriptionVisible && activeWorkers.length > workerLimit) ...[
+                    _WorkerBanner(
+                      message: '플랜 한도에 도달했어요. 업그레이드하면 더 많은 알바생을 관리할 수 있어요.',
+                      color: const Color(0xFFF3EEFF),
+                      textColor: const Color(0xFF7C3AED),
+                      onUpgrade: () => SubscriptionSheet.show(context,
+                          currentTier: SubscriptionService.instance.cached?.tier ?? PlanTier.free),
                     ),
                   ],
                   // ── 초대 코드 한 줄 ──
@@ -1922,6 +1893,70 @@ class _PayBadge extends StatelessWidget {
             style: TextStyle(
                 fontSize: 14, fontWeight: FontWeight.w800, color: valueColor)),
       ],
+    );
+  }
+}
+
+// ── 구독 배너 ──────────────────────────────────────────────────────
+class _WorkerBanner extends StatelessWidget {
+  const _WorkerBanner({
+    required this.message,
+    required this.color,
+    required this.textColor,
+    this.onUpgrade,
+  });
+
+  final String message;
+  final Color color;
+  final Color textColor;
+  final VoidCallback? onUpgrade;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 16, color: textColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+          ),
+          if (onUpgrade != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onUpgrade,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: textColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '플랜 업그레이드',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

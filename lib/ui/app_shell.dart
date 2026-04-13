@@ -47,6 +47,9 @@ import '../screens/join_store_sheet.dart';
 import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
 import '../ads/ad_service.dart';
+import '../subscription/subscription_service.dart';
+import '../screens/subscription_screen.dart' show kSubscriptionEnabled;
+import 'package:purchases_flutter/purchases_flutter.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -66,6 +69,7 @@ class _AppShellState extends State<AppShell> {
 
   // ✅ 개인 알바 정책 Firebase 복원용 구독
   StreamSubscription<Map<String, Map<String, dynamic>>>? _policyRestoreSub;
+  CustomerInfoUpdateListener? _customerInfoListener;
 
   String? _cachedUid;
   Stream<List<UICalendarAlba>>? _albasMergedStream;
@@ -91,9 +95,20 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _subscribePolicyRestore();
     _loadAdFreeStatus();
+    _subscribeCustomerInfoUpdates();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AdService.instance.showInterstitialAd();
     });
+  }
+
+  void _subscribeCustomerInfoUpdates() {
+    if (!kSubscriptionEnabled) return;
+    _customerInfoListener = (customerInfo) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      SubscriptionService.instance.refresh(uid);
+    };
+    Purchases.addCustomerInfoUpdateListener(_customerInfoListener!);
   }
 
   Future<void> _loadAdFreeStatus() async {
@@ -1809,6 +1824,9 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _policyRestoreSub?.cancel();
     _notiDebounce?.cancel();
+    if (_customerInfoListener != null) {
+      Purchases.removeCustomerInfoUpdateListener(_customerInfoListener!);
+    }
     super.dispose();
   }
 }

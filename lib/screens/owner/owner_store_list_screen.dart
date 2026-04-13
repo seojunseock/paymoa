@@ -205,14 +205,14 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
               return _EmptyView(onAdd: () => _onAddStoreTap(stores));
             }
 
-            // ── 구독 만료 시 잠금 분기 ──────────────────────
+            // ── 구독 플랜 한도 분기 ──────────────────────
             final subInfo = SubscriptionService.instance.cached;
             final isExpired =
                 subInfo?.status == SubscriptionStatus.expired;
             final isGrace =
                 subInfo?.status == SubscriptionStatus.gracePeriod;
-            // 한도는 만료 시에만 적용 (유예기간 중·활성 중은 제한 없음)
-            final planLimit = (kSubscriptionEnabled && isExpired)
+            // kSubscriptionVisible = true 시 플랜 한도 적용, 유예기간 중은 제한 없음
+            final planLimit = (kSubscriptionEnabled && kSubscriptionVisible && !isGrace)
                 ? (subInfo?.plan.maxStores ?? 999)
                 : 999;
             final normalStores =
@@ -233,12 +233,20 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
                   ),
                   const SizedBox(height: 8),
                 ],
-                // 만료 배너
+                // 한도 초과 / 만료 배너
                 if (kSubscriptionEnabled && isExpired) ...[
                   _SubscriptionBanner(
                     message: '구독이 만료됐어요. 일부 기능이 제한됩니다.',
                     color: const Color(0xFFFEE2E2),
                     iconColor: const Color(0xFFF43F5E),
+                    onUpgrade: () => SubscriptionSheet.show(context),
+                  ),
+                  const SizedBox(height: 8),
+                ] else if (kSubscriptionEnabled && kSubscriptionVisible && lockedStores.isNotEmpty) ...[
+                  _SubscriptionBanner(
+                    message: '플랜 한도에 도달했어요. 업그레이드하면 더 많은 매장을 관리할 수 있어요.',
+                    color: const Color(0xFFF3EEFF),
+                    iconColor: const Color(0xFF7C3AED),
                     onUpgrade: () => SubscriptionSheet.show(context),
                   ),
                   const SizedBox(height: 8),
@@ -281,7 +289,7 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
                           store: s,
                           isLocked: true,
                           onEdit: () {},
-                          onDelete: () {},
+                          onDelete: () => _confirmDelete(s),
                           onTap: () => SubscriptionSheet.show(context),
                         ),
                       )),
