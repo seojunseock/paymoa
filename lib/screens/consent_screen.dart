@@ -1,7 +1,6 @@
 // lib/screens/consent_screen.dart
 import 'package:flutter/material.dart';
-import 'terms_screen.dart';
-import 'privacy_policy_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ConsentScreen extends StatefulWidget {
   final Future<void> Function() onAgreed;
@@ -55,7 +54,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      const Spacer(flex: 2),
+                      const SizedBox(height: 48),
 
                       // ── 앱 아이콘
                       ClipRRect(
@@ -91,7 +90,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         ),
                       ),
 
-                      const Spacer(flex: 3),
+                      const SizedBox(height: 64),
 
                       // ── 동의 카드
                       Container(
@@ -144,10 +143,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                               label: '(필수) 이용약관 동의',
                               checked: _terms,
                               onChanged: (v) => setState(() => _terms = v),
-                              onViewTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const TermsScreen(),
-                                ),
+                              onViewTap: () => launchUrl(
+                                Uri.parse('https://funky-mandevilla-5dc.notion.site/Terms-of-Service-9a7d10d5a0394f2a9cee324fe89893a7'),
+                                mode: LaunchMode.externalApplication,
                               ),
                             ),
 
@@ -158,10 +156,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                               label: '(필수) 개인정보처리방침 동의',
                               checked: _privacy,
                               onChanged: (v) => setState(() => _privacy = v),
-                              onViewTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const PrivacyPolicyScreen(),
-                                ),
+                              onViewTap: () => launchUrl(
+                                Uri.parse('https://funky-mandevilla-5dc.notion.site/Privacy-Policy-599f1871c09d40d782e5c1936444f6ac'),
+                                mode: LaunchMode.externalApplication,
                               ),
                             ),
                           ],

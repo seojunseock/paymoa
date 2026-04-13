@@ -32,19 +32,6 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    await MobileAds.instance.initialize();
-    AdService.instance.preloadRewardedAd();
-    AdService.instance.preloadInterstitialAd(autoShow: true);
-
-    // RevenueCat 초기화
-    await Purchases.configure(
-      PurchasesConfiguration(
-        Platform.isIOS
-          ? 'test_ulrHfEoQqYaQNcAdPcngZOunQOS'
-          : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
-      ),
-    );
-
     await initializeDateFormatting('ko_KR', null);
 
     FlutterError.onError = (details) {
@@ -57,7 +44,22 @@ Future<void> main() async {
       );
     };
 
+    // runApp을 먼저 호출해 화면을 즉시 표시
     runApp(const _SafeBootApp());
+
+    // AdMob·RevenueCat은 백그라운드에서 초기화 (느려도 화면 안 막힘)
+    unawaited(MobileAds.instance.initialize().then((_) {
+      AdService.instance.preloadRewardedAd();
+      AdService.instance.preloadInterstitialAd(autoShow: true);
+    }));
+
+    unawaited(Purchases.configure(
+      PurchasesConfiguration(
+        Platform.isIOS
+          ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
+          : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
+      ),
+    ));
   }, (error, stack) {
     _showFatalSafely(title: 'Zoned error', message: '$error', st: stack);
   });
