@@ -59,7 +59,7 @@
 
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-2756061286403249~2635628236</string>
+	<string>ca-app-pub-2756061286403249~4692993470</string>
 
 	<!-- ✅ 카카오 앱 키 -->
 	<key>KAKAO_APP_KEY</key>

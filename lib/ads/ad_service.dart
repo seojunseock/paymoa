@@ -1,5 +1,6 @@
 // lib/ads/ad_service.dart
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ignore_for_file: unused_field
@@ -10,27 +11,32 @@ class _AdIds {
   static const _testRewarded = 'ca-app-pub-3940256099942544/5224354917';
   static const _testInterstitial = 'ca-app-pub-3940256099942544/1033173712';
 
-  // ── 실제 ID ──
+  // ── 실제 ID (Android) ──
   static const _realBannerAndroid = 'ca-app-pub-2756061286403249/1086876298';
   static const _realRewardedAndroid = 'ca-app-pub-2756061286403249/6982200803';
   static const _realInterstitialAndroid = 'ca-app-pub-2756061286403249/5629110129';
 
+  // ── 실제 ID (iOS) ──
+  static const _realBannerIos = 'ca-app-pub-2756061286403249/5970204095';
+  static const _realRewardedIos = 'ca-app-pub-2756061286403249/1636419446';
+  static const _realInterstitialIos = 'ca-app-pub-2756061286403249/1316643211';
+
   // ✅ 테스트 중: true / 출시 전: false 로 변경
-  static bool get _isTest => false;
+  static bool get _isTest => true;
 
   static String get banner {
     if (_isTest) return _testBanner;
-    return _realBannerAndroid;
+    return Platform.isIOS ? _realBannerIos : _realBannerAndroid;
   }
 
   static String get rewarded {
     if (_isTest) return _testRewarded;
-    return _realRewardedAndroid;
+    return Platform.isIOS ? _realRewardedIos : _realRewardedAndroid;
   }
 
   static String get interstitial {
     if (_isTest) return _testInterstitial;
-    return _realInterstitialAndroid;
+    return Platform.isIOS ? _realInterstitialIos : _realInterstitialAndroid;
   }
 }
 
