@@ -3,6 +3,12 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+  // UIWindow를 명시적으로 선언 (iOS 13+ UISceneDelegate 환경 대응)
+  override var window: UIWindow? {
+    get { return super.window }
+    set { super.window = newValue }
+  }
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
