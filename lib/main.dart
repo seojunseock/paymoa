@@ -22,24 +22,15 @@ bool _fatalHandling = false; // ✅ 에러 처리 중복/무한루프 방지
 bool _fatalDialogShowing = false; // ✅ 다이얼로그 중복 방지
 
 // Firebase + 날짜 초기화를 한 번만 실행하는 Future
-// 완료 시 allowFirstFrame() 호출 → iOS 런치 스크린 해제
 final Future<void> _appInitFuture = Future(() async {
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    await initializeDateFormatting('ko_KR', null);
-  } finally {
-    // 성공/실패 상관없이 반드시 해제 (안 하면 런치 스크린이 영원히 유지됨)
-    WidgetsBinding.instance.allowFirstFrame();
-  }
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  await initializeDateFormatting('ko_KR', null);
 });
 
 Future<void> main() async {
-  // deferFirstFrame: iOS 런치 스크린을 Firebase 초기화 완료까지 잠금
-  // flutter_native_splash 패키지가 내부적으로 쓰는 공식 Flutter 메커니즘
-  final binding = WidgetsFlutterBinding.ensureInitialized();
-  binding.deferFirstFrame();
+  WidgetsFlutterBinding.ensureInitialized();
 
   runZonedGuarded(() async {
     // 카카오 SDK 초기화 (네이티브 앱 키)
