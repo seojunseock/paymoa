@@ -34,7 +34,7 @@ Future<void> main() async {
 
   runZonedGuarded(() async {
     // 카카오 SDK 초기화 (네이티브 앱 키)
-    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
+    KakaoSdk.init(nativeAppKey: '0caeaf697a204f827b9d8525bd376311');
 
     FlutterError.onError = (details) {
       FlutterError.dumpErrorToConsole(details);
