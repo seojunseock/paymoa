@@ -32,54 +32,10 @@ final Future<void> _appInitFuture = Future(() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  FlutterError.onError = (details) {
-    FlutterError.dumpErrorToConsole(details);
-    _showFatalSafely(
-      title: 'FlutterError',
-      message: details.exceptionAsString(),
-      st: details.stack,
-    );
-  };
-
-  // 검은 화면 대신 에러 내용을 흰 화면에 표시 (진단용)
-  ErrorWidget.builder = (FlutterErrorDetails details) {
-    return MaterialApp(
-      home: Scaffold(
-        backgroundColor: Colors.white,
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            details.toString(),
-            style: const TextStyle(fontSize: 12, color: Colors.red),
-          ),
-        ),
-      ),
-    );
-  };
-
-  // runApp을 가장 먼저 호출 — SDK 초기화 실패와 무관하게 화면이 뜸
+  // 진단용: SDK 초기화 전부 제거 — runApp만 호출
+  // 빨간 화면이 뜨면 SDK 중 하나가 렌더링을 막은 것
+  // 여전히 검은 화면이면 Flutter 엔진 / Metal 문제
   runApp(const _SafeBootApp());
-
-  // 카카오 SDK 초기화
-  try {
-    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
-  } catch (e, st) {
-    debugPrint('[main] KakaoSdk init error: $e\n$st');
-  }
-
-  // AdMob·RevenueCat 백그라운드 초기화
-  unawaited(MobileAds.instance.initialize().then((_) {
-    AdService.instance.preloadRewardedAd();
-    AdService.instance.preloadInterstitialAd();
-  }));
-
-  unawaited(Purchases.configure(
-    PurchasesConfiguration(
-      Platform.isIOS
-        ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
-        : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
-    ),
-  ));
 }
 
 class _SafeBootApp extends StatelessWidget {

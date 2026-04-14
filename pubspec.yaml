@@ -2,7 +2,7 @@ name: paycount
 description: 페이모아 - 알바 급여 계산기
 publish_to: "none"
 
-version: 1.0.4+28
+version: 1.0.4+30
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
