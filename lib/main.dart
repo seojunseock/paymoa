@@ -54,7 +54,7 @@ Future<void> main() async {
   // AdMob·RevenueCat 백그라운드 초기화
   unawaited(MobileAds.instance.initialize().then((_) {
     AdService.instance.preloadRewardedAd();
-    AdService.instance.preloadInterstitialAd(autoShow: true);
+    AdService.instance.preloadInterstitialAd();
   }));
 
   unawaited(Purchases.configure(
