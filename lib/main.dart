@@ -32,37 +32,38 @@ final Future<void> _appInitFuture = Future(() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  runZonedGuarded(() async {
-    // 카카오 SDK 초기화 (네이티브 앱 키)
+  FlutterError.onError = (details) {
+    FlutterError.dumpErrorToConsole(details);
+    _showFatalSafely(
+      title: 'FlutterError',
+      message: details.exceptionAsString(),
+      st: details.stack,
+    );
+  };
+
+  // runApp을 가장 먼저 호출 — SDK 초기화 실패와 무관하게 화면이 뜸
+  runApp(const _SafeBootApp());
+
+  // 카카오 SDK 초기화
+  try {
     KakaoSdk.init(nativeAppKey: '0caeaf697a204f827b9d8525bd376311');
+  } catch (e, st) {
+    debugPrint('[main] KakaoSdk init error: $e\n$st');
+  }
 
-    FlutterError.onError = (details) {
-      FlutterError.dumpErrorToConsole(details);
-      _showFatalSafely(
-        title: 'FlutterError',
-        message: details.exceptionAsString(),
-        st: details.stack,
-      );
-    };
+  // AdMob·RevenueCat 백그라운드 초기화
+  unawaited(MobileAds.instance.initialize().then((_) {
+    AdService.instance.preloadRewardedAd();
+    AdService.instance.preloadInterstitialAd(autoShow: true);
+  }));
 
-    runApp(const _SafeBootApp());
-
-    // AdMob·RevenueCat은 백그라운드에서 초기화 (느려도 화면 안 막힘)
-    unawaited(MobileAds.instance.initialize().then((_) {
-      AdService.instance.preloadRewardedAd();
-      AdService.instance.preloadInterstitialAd(autoShow: true);
-    }));
-
-    unawaited(Purchases.configure(
-      PurchasesConfiguration(
-        Platform.isIOS
-          ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
-          : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
-      ),
-    ));
-  }, (error, stack) {
-    _showFatalSafely(title: 'Zoned error', message: '$error', st: stack);
-  });
+  unawaited(Purchases.configure(
+    PurchasesConfiguration(
+      Platform.isIOS
+        ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
+        : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
+    ),
+  ));
 }
 
 class _SafeBootApp extends StatelessWidget {
