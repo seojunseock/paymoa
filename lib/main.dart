@@ -18,8 +18,8 @@ import 'screens/privacy_policy_screen.dart';
 
 final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
-bool _fatalHandling = false; // ✅ 에러 처리 중복/무한루프 방지
-bool _fatalDialogShowing = false; // ✅ 다이얼로그 중복 방지
+bool _fatalHandling = false;
+bool _fatalDialogShowing = false;
 
 // Firebase + 날짜 초기화를 한 번만 실행하는 Future
 final Future<void> _appInitFuture = Future(() async {
@@ -32,39 +32,57 @@ final Future<void> _appInitFuture = Future(() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 진단용: SDK 초기화 전부 제거 — runApp만 호출
-  // 빨간 화면이 뜨면 SDK 중 하나가 렌더링을 막은 것
-  // 여전히 검은 화면이면 Flutter 엔진 / Metal 문제
-  runApp(const _SafeBootApp());
+  FlutterError.onError = (details) {
+    debugPrint('[FlutterError] ${details.exceptionAsString()}');
+  };
+
+  // runApp 먼저 호출 (SDK 초기화보다 앞에)
+  runApp(const _App());
+
+  // SDK 초기화는 runApp 이후 백그라운드에서 처리
+  try {
+    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
+  } catch (e) {
+    debugPrint('[KakaoSdk] init error: $e');
+  }
+
+  unawaited(MobileAds.instance.initialize().then((_) {
+    AdService.instance.preloadInterstitialAd();
+    AdService.instance.preloadRewardedAd();
+    debugPrint('[AdMob] initialized');
+  }).catchError((e) {
+    debugPrint('[AdMob] init error: $e');
+  }));
+
+  unawaited(Purchases.configure(PurchasesConfiguration(
+    Platform.isIOS
+        ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
+        : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
+  )).then((_) {
+    debugPrint('[RevenueCat] configured');
+  }).catchError((e) {
+    debugPrint('[RevenueCat] config error: $e');
+  }));
 }
 
-class _SafeBootApp extends StatelessWidget {
-  const _SafeBootApp();
+class _App extends StatelessWidget {
+  const _App();
 
   @override
   Widget build(BuildContext context) {
-    // ── 소거 테스트: Flutter 렌더링 자체가 되는지 확인 ──
-    // 빨간 화면이 뜨면 Flutter는 정상, 우리 코드 문제
-    // 검은 화면이면 Flutter 엔진 / Metal 렌더링 문제
-    return const MaterialApp(
-      home: Scaffold(backgroundColor: Colors.red),
-    );
-    // ignore: dead_code
-
     final base = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF7C3AED), // ✅ Paymoa violet-700
+      seedColor: const Color(0xFF7C3AED),
       brightness: Brightness.light,
     );
 
-    // ✅ Paymoa 보라 톤
     final cs = base.copyWith(
-      primary: const Color(0xFF7C3AED), // violet-700
-      primaryContainer: const Color(0xFFF3EEFF), // 연한 보라
+      primary: const Color(0xFF7C3AED),
+      primaryContainer: const Color(0xFFF3EEFF),
       onPrimaryContainer: const Color(0xFF3B0764),
       surface: const Color(0xFFFFFFFF),
       surfaceContainerLowest: const Color(0xFFFFFFFF),
-      surfaceContainerLow: const Color(0xFFF8F7FF), // Paymoa background
-      surfaceContainer: const Color(0xFFF4F0FF), // 연보라
+      surfaceContainerLow: const Color(0xFFF8F7FF),
+      surfaceContainer: const Color(0xFFF4F0FF),
       outline: const Color(0x1F0F172A),
     );
 
@@ -74,8 +92,7 @@ class _SafeBootApp extends StatelessWidget {
       navigatorKey: _navKey,
       title: 'Paymoa',
       debugShowCheckedModeBanner: false,
-      color: Colors.white, // 앱 전환 시 배경색 (검은 화면 방지)
-      // ✅ DatePicker 한국어 및 Material Localization 설정
+      color: Colors.white,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -228,15 +245,12 @@ class _SafeBootApp extends StatelessWidget {
       home: FutureBuilder<void>(
         future: _appInitFuture,
         builder: (context, initSnap) {
-          // Firebase 초기화 완료 전: 스플래시 표시
           if (initSnap.connectionState != ConnectionState.done) {
             return const _SplashScreen();
           }
-          // 초기화 실패 시: 검은 화면 대신 스플래시 유지
           if (initSnap.hasError) {
             return const _SplashScreen();
           }
-          // 초기화 완료 후: 인증 상태 감지
           return StreamBuilder<User?>(
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snap) {
@@ -319,7 +333,6 @@ void _showFatalSafely({
         ),
       );
 
-      // ✅ 다이얼로그는 중복 방지
       if (_fatalDialogShowing) {
         _fatalHandling = false;
         return;
