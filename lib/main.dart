@@ -87,6 +87,14 @@ class _SafeBootApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ── 소거 테스트: Flutter 렌더링 자체가 되는지 확인 ──
+    // 빨간 화면이 뜨면 Flutter는 정상, 우리 코드 문제
+    // 검은 화면이면 Flutter 엔진 / Metal 렌더링 문제
+    return const MaterialApp(
+      home: Scaffold(backgroundColor: Colors.red),
+    );
+    // ignore: dead_code
+
     final base = ColorScheme.fromSeed(
       seedColor: const Color(0xFF7C3AED), // ✅ Paymoa violet-700
       brightness: Brightness.light,
