@@ -97,7 +97,7 @@ class _AppShellState extends State<AppShell> {
     _loadAdFreeStatus();
     _subscribeCustomerInfoUpdates();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      AdService.instance.showInterstitialAd();
+      AdService.instance.requestShowWhenReady();
     });
   }
 

@@ -60,6 +60,16 @@ class AdService {
     _adFreeUntil = dt;
   }
 
+  /// 광고가 준비되면 즉시 표시. 로드 중이면 완료 후 자동 표시.
+  /// AppShell 진입 시 호출 — 신규 사용자(로그인 화면)는 호출하지 않음.
+  void requestShowWhenReady() {
+    if (_interstitialAd != null) {
+      showInterstitialAd();
+    } else {
+      _interstitialPendingShow = true;
+    }
+  }
+
   void preloadInterstitialAd({bool autoShow = false}) {
     if (_interstitialAd != null || _isInterstitialLoading) return;
     _isInterstitialLoading = true;

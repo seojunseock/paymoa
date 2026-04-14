@@ -42,7 +42,7 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
     super.initState();
     _initSubscription();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      AdService.instance.showInterstitialAd();
+      AdService.instance.requestShowWhenReady();
     });
   }
 
