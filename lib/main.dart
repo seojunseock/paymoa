@@ -46,7 +46,7 @@ Future<void> main() async {
 
   // 카카오 SDK 초기화
   try {
-    KakaoSdk.init(nativeAppKey: '0caeaf697a204f827b9d8525bd376311');
+    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
   } catch (e, st) {
     debugPrint('[main] KakaoSdk init error: $e\n$st');
   }
