@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>25</string>
+	<string>26</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -55,6 +55,10 @@
 
 	<!-- 암호화 수출 규정: 표준 암호화만 사용 (HTTPS/TLS), 별도 수출 허가 불필요 -->
 	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- Flutter: Impeller 비활성화 (iOS 18 + 최신 기기 GPU 검은 화면 방지) -->
+	<key>FLTEnableImpeller</key>
 	<false/>
 
 	<!-- AdMob App ID -->
