@@ -41,6 +41,22 @@ Future<void> main() async {
     );
   };
 
+  // 검은 화면 대신 에러 내용을 흰 화면에 표시 (진단용)
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.white,
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            details.toString(),
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
+        ),
+      ),
+    );
+  };
+
   // runApp을 가장 먼저 호출 — SDK 초기화 실패와 무관하게 화면이 뜸
   runApp(const _SafeBootApp());
 
