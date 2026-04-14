@@ -57,9 +57,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<!-- Flutter: Impeller 비활성화 (iOS 18 + 최신 기기 GPU 검은 화면 방지) -->
+	<!-- Flutter: Impeller 활성화 (iOS 18 + A18 GPU에서 Skia보다 안정적) -->
 	<key>FLTEnableImpeller</key>
-	<false/>
+	<true/>
 
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
