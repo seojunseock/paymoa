@@ -31,6 +31,22 @@ Future<void> main() async {
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
 
+  // release 모드에서 위젯 에러를 검은 화면 대신 빨간 텍스트로 표시 (진단용)
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.red,
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            '[ERROR]\n${details.exceptionAsString()}\n\n${details.stack ?? ''}',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  };
+
   // runApp 먼저 호출 (SDK 초기화보다 앞에)
   runApp(const _App());
 
