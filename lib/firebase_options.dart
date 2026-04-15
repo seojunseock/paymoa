@@ -40,19 +40,19 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyALgZZ4h8EfomEPewwRnfZa3yLWV6Y6lfI',
-    appId: '1:203699249513:ios:2bb681301e328726cb9df8',
-    messagingSenderId: '203699249513',
-    projectId: 'paymoa-b6415',
-    storageBucket: 'paymoa-b6415.firebasestorage.app',
-    iosBundleId: 'com.paycount.app',
+    apiKey: 'AIzaSyBqknaZD_9BkxhOFxxVSqnYihJxgh_Ci3M',
+    appId: '1:1020893766243:ios:3d2c37a72acb43c26d0e56',
+    messagingSenderId: '1020893766243',
+    projectId: 'paymoa-87ca6',
+    storageBucket: 'paymoa-87ca6.firebasestorage.app',
+    iosBundleId: 'com.paymoa.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBSF73AopudeiR9jwFjbIDinb8Xi9-wdLk',
-    appId: '1:203699249513:android:5870340ee95f03efcb9df8',
-    messagingSenderId: '203699249513',
-    projectId: 'paymoa-b6415',
-    storageBucket: 'paymoa-b6415.firebasestorage.app',
+    apiKey: 'AIzaSyBptgzuaaaVO3f36pzxH62gNtHUipQX1Ig',
+    appId: '1:1020893766243:android:6edd6d6548b1d12a6d0e56',
+    messagingSenderId: '1020893766243',
+    projectId: 'paymoa-87ca6',
+    storageBucket: 'paymoa-87ca6.firebasestorage.app',
   );
 }

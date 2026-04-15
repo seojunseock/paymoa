@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>34</string>
+	<string>35</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -90,7 +90,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<!-- Google 로그인 콜백 (GoogleService-Info.plist의 REVERSED_CLIENT_ID) -->
-				<string>com.googleusercontent.apps.203699249513-rf9rus1pbcfd8nrns2trqiqckerpa8t8</string>
+				<string>com.googleusercontent.apps.1020893766243-8mt5j6dkiahl3fvql29kh7kronltl94e</string>
 			</array>
 		</dict>
 	</array>

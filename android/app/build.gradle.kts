@@ -18,13 +18,13 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.paycount.app"
+    namespace = "com.paymoa.app"
     compileSdk = flutter.compileSdkVersion
 
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.paycount.app"
+        applicationId = "com.paymoa.app"
         minSdk = 23
         targetSdk = 35
         versionCode = flutter.versionCode

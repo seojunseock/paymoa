@@ -22,7 +22,19 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''private:'''', d.get\\(''''private''''\\), ''''visibility:'''', d.get\\(''''visibility''''\\)\\)\")",
       "Bash(curl -s \"https://api.github.com/users/seojunseock/repos?per_page=20\")",
       "Bash(python -c \"import sys,json; repos=json.load\\(sys.stdin\\); [print\\(f''''{r[name]} - {private if r[private] else public}''''\\) for r in repos]\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(find /c/dev/paycount/ios/Runner -maxdepth 2 -type f -name *.swift -o -name *.plist -o -name *.storyboard)",
+      "Bash(file:*)",
+      "Bash(grep -r \"LaunchImage\\\\|LaunchScreen\" /c/dev/paycount/ios/Runner/ --include=*.plist --include=*.storyboard)",
+      "Bash(find /c/dev/paycount -name *.dart -path */lib/* -type f)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:jatin-95284.medium.com)",
+      "WebFetch(domain:api.flutter.dev)",
+      "WebFetch(domain:www.bacancytechnology.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:groups.google.com)",
+      "WebFetch(domain:docs.outlast.io)"
     ]
   }
 }

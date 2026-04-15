@@ -1,5 +1,5 @@
 // android/app/src/main/kotlin/com/paycount/app/MainActivity.kt
-package com.paycount.app
+package com.paymoa.app
 
 import io.flutter.embedding.android.FlutterActivity
 
