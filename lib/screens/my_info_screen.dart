@@ -3,9 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../ads/ad_service.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
@@ -85,112 +83,14 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
   List<_MonthPoint> _points = const [];
   int _touchedIndex = -1;
 
-  // ── 프로모션 코드 ──
-  final _promoCtrl = TextEditingController();
-  bool _promoLoading = false;
-  String? _promoError;
-  DateTime? _adFreeUntil;
-
   @override
   void initState() {
     super.initState();
     _syncPoints();
-    _loadAdFreeStatus();
-  }
-
-  Future<void> _loadAdFreeStatus() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    if (!mounted) return;
-    final ts = doc.data()?['adFreeUntil'];
-    if (ts is Timestamp) {
-      final dt = ts.toDate();
-      if (dt.isAfter(DateTime.now())) {
-        setState(() => _adFreeUntil = dt);
-        AdService.instance.setAdFreeUntil(dt);
-      }
-    }
-  }
-
-  Future<void> _applyPromo() async {
-    final code = _promoCtrl.text.trim().toUpperCase();
-    if (code.isEmpty) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    setState(() {
-      _promoLoading = true;
-      _promoError = null;
-    });
-
-    try {
-      final db = FirebaseFirestore.instance;
-      final ref = db.collection('promoCodes').doc(code);
-      final usedByRef = ref.collection('usedBy').doc(uid);
-      String? errorMsg;
-      DateTime? newAdFreeUntil;
-
-      await db.runTransaction((tx) async {
-        final doc = await tx.get(ref);
-        if (!doc.exists) { errorMsg = '유효하지 않은 코드예요.'; return; }
-        final data = doc.data()!;
-
-        if (data['active'] == false) { errorMsg = '유효하지 않은 코드예요.'; return; }
-
-        final expiresAt = data['expiresAt'];
-        if (expiresAt is Timestamp && expiresAt.toDate().isBefore(DateTime.now())) {
-          errorMsg = '만료된 코드예요.'; return;
-        }
-
-        final adFreeMonths = (data['adFreeMonths'] as num?)?.toInt();
-        if (adFreeMonths == null || adFreeMonths <= 0) {
-          errorMsg = '유효하지 않은 코드예요.'; return;
-        }
-
-        final maxUses = data['maxUses'];
-        if (maxUses != null) {
-          final usedCount = (data['usedCount'] as num?)?.toInt() ?? 0;
-          if (usedCount >= (maxUses as num).toInt()) {
-            errorMsg = '사용 횟수가 초과된 코드예요.'; return;
-          }
-        }
-
-        final usedByDoc = await tx.get(usedByRef);
-        if (usedByDoc.exists) { errorMsg = '이미 사용한 코드예요.'; return; }
-
-        // 기존 남은 기간 있으면 연장, 없으면 지금부터 계산
-        final base = (_adFreeUntil != null && _adFreeUntil!.isAfter(DateTime.now()))
-            ? _adFreeUntil!
-            : DateTime.now();
-        final newDate = DateTime(base.year, base.month + adFreeMonths, base.day);
-        newAdFreeUntil = newDate;
-
-        tx.update(ref, {'usedCount': FieldValue.increment(1)});
-        tx.set(usedByRef, {'usedAt': FieldValue.serverTimestamp()});
-        tx.update(db.collection('users').doc(uid), {
-          'adFreeUntil': Timestamp.fromDate(newDate),
-        });
-      });
-
-      if (!mounted) return;
-      if (errorMsg != null) {
-        setState(() => _promoError = errorMsg);
-      } else if (newAdFreeUntil != null) {
-        setState(() => _adFreeUntil = newAdFreeUntil);
-        AdService.instance.setAdFreeUntil(newAdFreeUntil);
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _promoError = '코드 확인 중 오류가 발생했어요.');
-    } finally {
-      if (mounted) setState(() => _promoLoading = false);
-    }
   }
 
   @override
   void dispose() {
-    _promoCtrl.dispose();
     super.dispose();
   }
 
@@ -314,128 +214,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     return b.toString();
   }
 
-  Widget _buildPromoSection() {
-    final isActive = _adFreeUntil != null && _adFreeUntil!.isAfter(DateTime.now());
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '프로모션 코드',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF6B7280),
-            ),
-          ),
-          if (isActive) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.card_giftcard_rounded,
-                    size: 16, color: Color(0xFF7C3AED)),
-                const SizedBox(width: 6),
-                Text(
-                  '광고 없음 적용 중  ·  ${_adFreeUntil!.year}.${_adFreeUntil!.month.toString().padLeft(2, '0')}.${_adFreeUntil!.day.toString().padLeft(2, '0')} 까지',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF7C3AED),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _promoCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.5,
-                    color: Color(0xFF111827),
-                  ),
-                  decoration: InputDecoration(
-                    hintText: '코드 입력',
-                    hintStyle: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: Color(0xFFD1D5DB),
-                      letterSpacing: 0,
-                    ),
-                    filled: true,
-                    fillColor: const Color(0xFFF9FAFB),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                          color: Color(0xFF7C3AED), width: 1.5),
-                    ),
-                  ),
-                  onSubmitted: (_) => _applyPromo(),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 46,
-                child: FilledButton(
-                  onPressed: _promoLoading ? null : _applyPromo,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C3AED),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                  ),
-                  child: _promoLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Text(
-                          '적용',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                ),
-              ),
-            ],
-          ),
-          if (_promoError != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _promoError!,
-              style: const TextStyle(fontSize: 12, color: Color(0xFFF43F5E)),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -461,8 +239,6 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
           _buildIncomeCard(),
           const SizedBox(height: 16),
           _buildPolicyCard(),
-          const SizedBox(height: 12),
-          _buildPromoSection(),
           const SizedBox(height: 12),
           _buildFaqSupportCard(),
           const SizedBox(height: 12),

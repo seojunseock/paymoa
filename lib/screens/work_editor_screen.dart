@@ -9,7 +9,6 @@ import '../policies/policies.dart' as pol;
 import '../policies/policy_sheet.dart';
 import 'date_assign_sheet.dart';
 import 'work_editor_args.dart' as wargs;
-import '../ads/ad_service.dart';
 import '../services/last_work_time_service.dart';
 
 /* ───────────────── 바텀시트 열기 ───────────────── */
@@ -365,10 +364,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
   }
 
   void _saveTapped() {
-    AdService.instance.showRewardedAd(
-      onRewarded: _save,
-      onNotReady: _save,
-    );
+    _save();
   }
 
   Future<void> _save() async {

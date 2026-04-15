@@ -1,7 +1,6 @@
 // lib/ui/app_shell_owner.dart
 import 'dart:math';
 import 'package:url_launcher/url_launcher.dart';
-import '../ads/ad_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -41,9 +40,6 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
   void initState() {
     super.initState();
     _initSubscription();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      AdService.instance.requestShowWhenReady();
-    });
   }
 
   Future<void> _initSubscription() async {
@@ -248,7 +244,6 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
         bottom: false,
         child: Column(
           children: [
-            const AdBannerWidget(),
             Expanded(child: pages[_index]),
           ],
         ),

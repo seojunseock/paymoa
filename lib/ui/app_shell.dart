@@ -46,10 +46,6 @@ import '../screens/join_store_sheet.dart';
 // role / consent
 import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
-import '../ads/ad_service.dart';
-import '../subscription/subscription_service.dart';
-import '../screens/subscription_screen.dart' show kSubscriptionEnabled;
-import 'package:purchases_flutter/purchases_flutter.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -69,7 +65,6 @@ class _AppShellState extends State<AppShell> {
 
   // ✅ 개인 알바 정책 Firebase 복원용 구독
   StreamSubscription<Map<String, Map<String, dynamic>>>? _policyRestoreSub;
-  CustomerInfoUpdateListener? _customerInfoListener;
 
   String? _cachedUid;
   Stream<List<UICalendarAlba>>? _albasMergedStream;
@@ -94,35 +89,6 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _subscribePolicyRestore();
-    _loadAdFreeStatus();
-    _subscribeCustomerInfoUpdates();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      AdService.instance.requestShowWhenReady();
-    });
-  }
-
-  void _subscribeCustomerInfoUpdates() {
-    if (!kSubscriptionEnabled) return;
-    _customerInfoListener = (customerInfo) {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
-      SubscriptionService.instance.refresh(uid);
-    };
-    Purchases.addCustomerInfoUpdateListener(_customerInfoListener!);
-  }
-
-  Future<void> _loadAdFreeStatus() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    if (!mounted) return;
-    final ts = doc.data()?['adFreeUntil'];
-    if (ts is Timestamp) {
-      final dt = ts.toDate();
-      if (dt.isAfter(DateTime.now())) {
-        AdService.instance.setAdFreeUntil(dt);
-      }
-    }
   }
 
   void _subscribePolicyRestore() {
@@ -1775,12 +1741,7 @@ class _AppShellState extends State<AppShell> {
                 return Scaffold(
                   body: SafeArea(
                     bottom: false,
-                    child: Column(
-                      children: [
-                        const AdBannerWidget(),
-                        Expanded(child: IndexedStack(index: _tab, children: pages)),
-                      ],
-                    ),
+                    child: IndexedStack(index: _tab, children: pages),
                   ),
                   bottomNavigationBar: NavigationBar(
                     selectedIndex: _tab,
@@ -1824,9 +1785,6 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _policyRestoreSub?.cancel();
     _notiDebounce?.cancel();
-    if (_customerInfoListener != null) {
-      Purchases.removeCustomerInfoUpdateListener(_customerInfoListener!);
-    }
     super.dispose();
   }
 }

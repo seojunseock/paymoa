@@ -13,8 +13,6 @@ import 'date_assign_sheet.dart';
 // payroll
 import '../payroll/payroll.dart';
 import 'payroll_policy_sheet.dart';
-import '../ads/ad_service.dart';
-
 class AlbaFormScreen extends StatefulWidget {
   const AlbaFormScreen({
     super.key,
@@ -625,10 +623,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       policyEffectiveFrom: policyEffectiveFrom,
       surchargeEffectiveFrom: surchargeEffectiveFrom,
     );
-    AdService.instance.showRewardedAd(
-      onRewarded: () => widget.onSubmit(result),
-      onNotReady: () => widget.onSubmit(result),
-    );
+    widget.onSubmit(result);
   }
 
   int _deriveLegacyPayDay(PayrollPolicy p) {

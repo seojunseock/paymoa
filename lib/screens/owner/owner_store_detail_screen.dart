@@ -18,7 +18,6 @@ import '../../policies/policies.dart';
 import '../../policies/policy_mapper.dart' as pm;
 
 import '../../payroll/payroll_engine.dart';
-import '../../ads/ad_service.dart';
 import '../../payroll/payroll_policy.dart';
 import '../../payroll/payroll_document_service.dart';
 
@@ -222,28 +221,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                             month: month,
                           );
 
-                      if (!kSubscriptionEnabled) {
-                        // 구독 비활성화: 광고 없이 바로 받기
-                        doExport();
-                      } else {
-                        final tier =
-                            SubscriptionService.instance.cached?.tier;
-                        final isPaid = tier != null &&
-                            tier != PlanTier.free;
-                        if (isPaid) {
-                          // 유료 플랜: 광고 없이 바로 받기
-                          doExport();
-                        } else {
-                          // 무료 플랜: 리워드 광고 시청 후 받기
-                          AdService.instance.showRewardedAd(
-                            onRewarded: () {
-                              if (!context.mounted) return;
-                              doExport();
-                            },
-                            onNotReady: doExport,
-                          );
-                        }
-                      }
+                      doExport();
                     },
                   ),
 

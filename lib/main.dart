@@ -5,11 +5,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'dart:io';
-import 'package:purchases_flutter/purchases_flutter.dart';
-import 'ads/ad_service.dart';
-
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
 import 'firebase_options.dart';
 import 'role/role_gate.dart';
@@ -46,23 +41,6 @@ Future<void> main() async {
     debugPrint('[KakaoSdk] init error: $e');
   }
 
-  unawaited(MobileAds.instance.initialize().then((_) {
-    AdService.instance.preloadInterstitialAd();
-    AdService.instance.preloadRewardedAd();
-    debugPrint('[AdMob] initialized');
-  }).catchError((e) {
-    debugPrint('[AdMob] init error: $e');
-  }));
-
-  unawaited(Purchases.configure(PurchasesConfiguration(
-    Platform.isIOS
-        ? 'appl_ChXJNrQtALfELGAcbtbDwWKLTww'
-        : 'goog_rktGmHUQOMvyZPNdOLnEHHzcgrx',
-  )).then((_) {
-    debugPrint('[RevenueCat] configured');
-  }).catchError((e) {
-    debugPrint('[RevenueCat] config error: $e');
-  }));
 }
 
 class _App extends StatelessWidget {

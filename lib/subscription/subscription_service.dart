@@ -1,15 +1,8 @@
 // lib/subscription/subscription_service.dart
 //
-// RevenueCat 기반 구독 상태 관리.
-// kSubscriptionEnabled = false 이면 모든 로직이 no-op 으로 동작.
+// 구독 상태 관리 (RevenueCat 제거됨 - 추후 재연동 예정)
 //
-// ── 연동 구조 ────────────────────────────────────────────────────────────────
-// [자신]  RevenueCat.getCustomerInfo() → entitlements → PlanTier
-// [타인]  Firestore users/{uid}.subscriptionTier (구매 시 자동 동기화)
-// ──────────────────────────────────────────────────────────────────────────────
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
 
 import '../screens/subscription_screen.dart';
 
@@ -62,7 +55,7 @@ class SubscriptionService {
 
   SubscriptionInfo? _cached;
   bool _initialized = false;
-  bool _shouldShowWarning = false;
+  final bool _shouldShowWarning = false;
 
   SubscriptionInfo? get cached => _cached;
   bool get shouldShowBillingWarning => _shouldShowWarning;
@@ -79,69 +72,28 @@ class SubscriptionService {
     if (_initialized) return;
     _initialized = true;
 
-    try {
-      _cached = await _fetchInfo(uid);
-    } catch (e) {
-      debugPrint('[SubscriptionService] init error: $e');
-      _cached = const SubscriptionInfo(
-        status: SubscriptionStatus.free,
-        tier: PlanTier.free,
-      );
-    }
+    // RevenueCat 제거됨: 항상 무료 플랜
+    _cached = const SubscriptionInfo(
+      status: SubscriptionStatus.free,
+      tier: PlanTier.free,
+    );
   }
 
-  // ── 수동 갱신 (구독 화면에서 플랜 변경 후 호출) ─
+  // ── 수동 갱신 ─
   Future<SubscriptionInfo> refresh(String uid) async {
     if (!kSubscriptionEnabled) return _cached!;
-    _initialized = false; // 재조회 허용
-    try {
-      _cached = await _fetchInfo(uid);
-    } catch (e) {
-      debugPrint('[SubscriptionService] refresh error: $e');
-    }
-    return _cached ??
-        const SubscriptionInfo(
-          status: SubscriptionStatus.free,
-          tier: PlanTier.free,
-        );
+    _initialized = false;
+    _cached = const SubscriptionInfo(
+      status: SubscriptionStatus.free,
+      tier: PlanTier.free,
+    );
+    return _cached!;
   }
 
   // ── 로그아웃 시 세션 초기화 ──────────────
   void clearSession() {
     _initialized = false;
     _cached = null;
-    _shouldShowWarning = false;
-  }
-
-  // ─────────────────────────────────────────
-  // 내부: RevenueCat에서 내 구독 상태 읽기 + Firestore 동기화
-  // ─────────────────────────────────────────
-  Future<SubscriptionInfo> _fetchInfo(String uid) async {
-    final customerInfo = await Purchases.getCustomerInfo();
-    final active = customerInfo.entitlements.active;
-
-    PlanTier tier;
-    if (active.containsKey('business')) {
-      tier = PlanTier.business;
-    } else if (active.containsKey('pro')) {
-      tier = PlanTier.pro;
-    } else if (active.containsKey('classic')) {
-      tier = PlanTier.classic;
-    } else {
-      tier = PlanTier.free;
-    }
-
-    // 타인이 참조할 수 있도록 Firestore에도 동기화
-    FirebaseFirestore.instance.collection('users').doc(uid).set(
-      {'subscriptionTier': _tierToString(tier)},
-      SetOptions(merge: true),
-    );
-
-    final status = tier == PlanTier.free
-        ? SubscriptionStatus.free
-        : SubscriptionStatus.active;
-
-    return SubscriptionInfo(status: status, tier: tier);
   }
 
   // ─────────────────────────────────────────
@@ -166,15 +118,6 @@ class SubscriptionService {
       case 'pro': return PlanTier.pro;
       case 'business': return PlanTier.business;
       default: return PlanTier.free;
-    }
-  }
-
-  String _tierToString(PlanTier tier) {
-    switch (tier) {
-      case PlanTier.classic: return 'classic';
-      case PlanTier.pro: return 'pro';
-      case PlanTier.business: return 'business';
-      default: return 'free';
     }
   }
 }

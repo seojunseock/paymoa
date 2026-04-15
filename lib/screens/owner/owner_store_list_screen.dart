@@ -13,7 +13,6 @@ import '../../payroll/payroll.dart';
 import '../../payroll/payroll_policy_mapper.dart' as ppm;
 import '../subscription_screen.dart';
 import '../../subscription/subscription_service.dart';
-import '../../ads/ad_service.dart';
 
 /* ─── helpers ─────────────────────────────────── */
 String _comma(int n) {
@@ -261,22 +260,7 @@ class _OwnerStoreListScreenState extends State<OwnerStoreListScreen> {
                             AppNav.openOwnerStoreEdit(context: context, store: s),
                         onDelete: () => _confirmDelete(s),
                         onTap: () {
-                          final tier = SubscriptionService.instance.cached?.tier;
-                          final isPaid = tier != null && tier != PlanTier.free;
-                          if (isPaid) {
-                            AppNav.openOwnerStoreDetail(context: context, store: s);
-                          } else {
-                            AdService.instance.showRewardedAd(
-                              onRewarded: () {
-                                if (!context.mounted) return;
-                                AppNav.openOwnerStoreDetail(context: context, store: s);
-                              },
-                              onNotReady: () {
-                                if (!context.mounted) return;
-                                AppNav.openOwnerStoreDetail(context: context, store: s);
-                              },
-                            );
-                          }
+                          AppNav.openOwnerStoreDetail(context: context, store: s);
                         },
                       ),
                     )),
