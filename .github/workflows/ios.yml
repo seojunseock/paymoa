@@ -30,13 +30,14 @@ jobs:
         run: pip3 install codemagic-cli-tools --break-system-packages
 
       - name: Fetch signing certificates & profiles
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
         run: |
           app-store-connect fetch-signing-files com.paymoa.app \
             --type IOS_APP_STORE \
-            --create \
-            --api-key ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-            --issuer-id ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
-            --private-key @file:~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+            --create
 
       - name: Add certificates to keychain
         run: |
@@ -44,8 +45,7 @@ jobs:
           keychain add-certificates
 
       - name: Set Xcode code signing settings
-        run: |
-          xcode-project use-profiles
+        run: xcode-project use-profiles
 
       - name: Flutter build iOS (release)
         run: flutter build ios --release --no-codesign
@@ -57,9 +57,10 @@ jobs:
             --scheme Runner
 
       - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
         run: |
           app-store-connect publish \
-            --path build/ios/ipa/*.ipa \
-            --api-key ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-            --issuer-id ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
-            --private-key @file:~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+            --path build/ios/ipa/*.ipa
