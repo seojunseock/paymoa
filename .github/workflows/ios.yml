@@ -40,7 +40,6 @@ jobs:
             -archivePath $RUNNER_TEMP/Runner.xcarchive \
             DEVELOPMENT_TEAM=G9ZKTNDZ3P \
             CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="iPhone Distribution" \
             archive \
             -allowProvisioningUpdates \
             -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
