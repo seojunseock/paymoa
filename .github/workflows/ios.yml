@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -29,12 +33,15 @@ jobs:
           APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 인증서용 개인키 준비 (저장된 시크릿이 있으면 사용, 없으면 새로 생성)
+          # 인증서용 개인키 준비 (저장된 시크릿이 있으면 사용, 없으면 새로 생성 후 자동 저장)
           if [ -n "${{ secrets.CERTIFICATE_PRIVATE_KEY }}" ]; then
             echo "${{ secrets.CERTIFICATE_PRIVATE_KEY }}" > /tmp/dist_key.pem
           else
             openssl genrsa -out /tmp/dist_key.pem 2048
+            # 생성된 키를 GitHub Secrets에 자동 저장 (다음 빌드부터 재사용)
+            gh secret set CERTIFICATE_PRIVATE_KEY < /tmp/dist_key.pem
           fi
 
           # 임시 키체인 초기화
