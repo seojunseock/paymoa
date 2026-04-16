@@ -80,16 +80,13 @@ jobs:
 
       - name: Export IPA
         run: |
-          # 설치된 프로비저닝 프로파일 검색 (여러 경로 시도)
-          PROFILE_PATH=$(find \
-            "$HOME/Library/MobileDevice/Provisioning Profiles" \
-            "$HOME/Library/codemagic-cli-tools" \
-            -name "*.mobileprovision" 2>/dev/null | head -1)
+          # archive에 이미 embed된 프로파일에서 이름 읽기
+          PROFILE_PATH="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app/embedded.mobileprovision"
 
-          if [ -z "$PROFILE_PATH" ]; then
-            echo "=== 모든 경로에서 프로파일 검색 ==="
-            find ~ -name "*.mobileprovision" -maxdepth 8 2>/dev/null
-            exit 1
+          if [ ! -f "$PROFILE_PATH" ]; then
+            echo "embedded.mobileprovision 없음, Xcode 경로에서 검색"
+            PROFILE_PATH=$(find "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+              -name "*.mobileprovision" 2>/dev/null | head -1)
           fi
 
           echo "프로파일 경로: $PROFILE_PATH"
