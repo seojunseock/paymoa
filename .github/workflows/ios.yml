@@ -41,9 +41,10 @@ jobs:
           keychain initialize
 
           # Distribution 인증서 + App Store 프로파일 생성/다운로드
+          # --certificate-key는 파일 경로가 아닌 환경변수로 전달
+          CERTIFICATE_PRIVATE_KEY=@/tmp/dist_key.pem \
           app-store-connect fetch-signing-files com.paymoa.app \
             --type IOS_APP_STORE \
-            --certificate-key /tmp/dist_key.pem \
             --create
 
           # 키체인에 인증서 설치
