@@ -21,11 +21,36 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Setup App Store Connect API Key
+      - name: Install codemagic-cli-tools
+        run: pip3 install codemagic-cli-tools --break-system-packages
+
+      - name: Setup signing (Distribution cert + App Store profile)
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.appstoreconnect/private_keys
-          echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
-          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+          # 인증서용 개인키 준비 (저장된 시크릿이 있으면 사용, 없으면 새로 생성)
+          if [ -n "${{ secrets.CERTIFICATE_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.CERTIFICATE_PRIVATE_KEY }}" > /tmp/dist_key.pem
+          else
+            openssl genrsa -out /tmp/dist_key.pem 2048
+          fi
+
+          # 임시 키체인 초기화
+          keychain initialize
+
+          # Distribution 인증서 + App Store 프로파일 생성/다운로드
+          app-store-connect fetch-signing-files com.paymoa.app \
+            --type IOS_APP_STORE \
+            --certificate-key /tmp/dist_key.pem \
+            --create
+
+          # 키체인에 인증서 설치
+          keychain add-certificates
+
+          # Xcode 프로젝트에 Manual 서명 + 프로파일 자동 적용
+          xcode-project use-profiles
 
       - name: Flutter build iOS release
         run: flutter build ios --release --no-codesign
@@ -39,29 +64,19 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath $RUNNER_TEMP/Runner.xcarchive \
             DEVELOPMENT_TEAM=G9ZKTNDZ3P \
-            CODE_SIGN_STYLE=Automatic \
-            archive \
-            -allowProvisioningUpdates \
-            -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+            CODE_SIGN_STYLE=Manual \
+            archive
 
       - name: Export IPA
         run: |
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/Runner.xcarchive \
             -exportPath $RUNNER_TEMP/ipa \
-            -exportOptionsPlist ios/ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+            -exportOptionsPlist ios/ExportOptions.plist
 
       - name: Upload to TestFlight
         env:
           APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
-        run: |
-          pip3 install codemagic-cli-tools --break-system-packages
-          app-store-connect publish --path $RUNNER_TEMP/ipa/*.ipa
+        run: app-store-connect publish --path $RUNNER_TEMP/ipa/*.ipa
