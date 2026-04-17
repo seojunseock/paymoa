@@ -20,7 +20,9 @@ bool _fatalDialogShowing = false;
 final Future<void> _appInitFuture = Future(() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
-  );
+  ).timeout(const Duration(seconds: 15), onTimeout: () {
+    debugPrint('[Firebase] initializeApp timeout - 강제 진행');
+  });
   await initializeDateFormatting('ko_KR', null);
 });
 
@@ -259,38 +261,22 @@ class _App extends StatelessWidget {
   }
 }
 
-/// 앱 시작 시 Firebase 초기화 중 보여주는 스플래시 화면
+/// 앱 시작 시 Firebase 초기화 중 보여주는 스플래시 화면 (진단용: 노란 배경)
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
+    return const Scaffold(
+      backgroundColor: Colors.yellow,
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(36),
-              child: const Image(
-                image: AssetImage('assets/images/app_icon.png'),
-                width: 120,
-                height: 120,
-                fit: BoxFit.cover,
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              '페이모아',
-              style: TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF7C3AED),
-                letterSpacing: -0.5,
-              ),
-            ),
-          ],
+        child: Text(
+          '로딩 중...',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
         ),
       ),
     );
