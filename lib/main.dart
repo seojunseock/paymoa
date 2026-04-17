@@ -34,22 +34,6 @@ Future<void> main() async {
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
 
-  // release 모드에서 위젯 에러를 검은 화면 대신 빨간 텍스트로 표시 (진단용)
-  ErrorWidget.builder = (FlutterErrorDetails details) {
-    return MaterialApp(
-      home: Scaffold(
-        backgroundColor: Colors.red,
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            '[ERROR]\n${details.exceptionAsString()}\n\n${details.stack ?? ''}',
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-          ),
-        ),
-      ),
-    );
-  };
-
   // runApp 먼저 호출 (SDK 초기화보다 앞에)
   runApp(const _App());
 
@@ -262,24 +246,14 @@ class _App extends StatelessWidget {
   }
 }
 
-/// 앱 시작 시 Firebase 초기화 중 보여주는 스플래시 화면 (진단용: 노란 배경)
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Colors.yellow,
-      body: Center(
-        child: Text(
-          '로딩 중...',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.black,
-          ),
-        ),
-      ),
+      backgroundColor: Colors.white,
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }
