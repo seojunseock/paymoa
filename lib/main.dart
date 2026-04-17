@@ -20,8 +20,9 @@ bool _fatalDialogShowing = false;
 final Future<void> _appInitFuture = Future(() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
-  ).timeout(const Duration(seconds: 15), onTimeout: () {
+  ).timeout(const Duration(seconds: 15), onTimeout: () async {
     debugPrint('[Firebase] initializeApp timeout - 강제 진행');
+    return Firebase.app();
   });
   await initializeDateFormatting('ko_KR', null);
 });
