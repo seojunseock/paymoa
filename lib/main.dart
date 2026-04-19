@@ -1,5 +1,4 @@
 // lib/main.dart
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -16,23 +15,6 @@ final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 bool _fatalHandling = false;
 bool _fatalDialogShowing = false;
 
-// 진단용: 초기화 상태 메시지
-String _initStatus = '시작 중...';
-
-// Firebase + 날짜 초기화를 한 번만 실행하는 Future
-final Future<void> _appInitFuture = Future(() async {
-  _initStatus = 'Firebase 초기화 중...';
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  ).timeout(const Duration(seconds: 15), onTimeout: () async {
-    _initStatus = 'Firebase timeout - 강제 진행';
-    return Firebase.app();
-  });
-  _initStatus = '날짜 초기화 중...';
-  await initializeDateFormatting('ko_KR', null);
-  _initStatus = '완료';
-});
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -40,15 +22,19 @@ Future<void> main() async {
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
 
-  // runApp 먼저 호출 (SDK 초기화보다 앞에)
-  runApp(const _App());
+  // Firebase + 날짜 초기화를 runApp 전에 완료
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  await initializeDateFormatting('ko_KR', null);
 
-  // SDK 초기화는 runApp 이후 백그라운드에서 처리
   try {
     KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
   } catch (e) {
     debugPrint('[KakaoSdk] init error: $e');
   }
+
+  runApp(const _App());
 }
 
 class _App extends StatelessWidget {
@@ -228,24 +214,13 @@ class _App extends StatelessWidget {
         '/terms': (_) => const TermsScreen(),
         '/privacy': (_) => const PrivacyPolicyScreen(),
       },
-      home: FutureBuilder<void>(
-        future: _appInitFuture,
-        builder: (context, initSnap) {
-          if (initSnap.connectionState != ConnectionState.done) {
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
             return const _SplashScreen();
           }
-          if (initSnap.hasError) {
-            return const _SplashScreen();
-          }
-          return StreamBuilder<User?>(
-            stream: FirebaseAuth.instance.authStateChanges(),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const _SplashScreen();
-              }
-              return const RoleGate();
-            },
-          );
+          return const RoleGate();
         },
       ),
     );
@@ -257,25 +232,9 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFFFF00), // 진단용 노란색
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: Colors.black),
-            const SizedBox(height: 16),
-            Text(
-              _initStatus,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return const Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }
