@@ -18,23 +18,8 @@ bool _fatalDialogShowing = false;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  FlutterError.onError = (details) {
-    debugPrint('[FlutterError] ${details.exceptionAsString()}');
-  };
-
-  // Firebase + 날짜 초기화를 runApp 전에 완료
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  await initializeDateFormatting('ko_KR', null);
-
-  try {
-    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
-  } catch (e) {
-    debugPrint('[KakaoSdk] init error: $e');
-  }
-
-  runApp(const _App());
+  // 진단용: Flutter 렌더링 자체가 되는지 먼저 확인
+  runApp(const _DiagApp());
 }
 
 class _App extends StatelessWidget {
@@ -222,6 +207,31 @@ class _App extends StatelessWidget {
           }
           return const RoleGate();
         },
+      ),
+    );
+  }
+}
+
+// 진단용: Firebase/Kakao 없이 순수 Flutter 렌더링 테스트
+class _DiagApp extends StatelessWidget {
+  const _DiagApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: Scaffold(
+        backgroundColor: Color(0xFF00CC44), // 밝은 초록
+        body: Center(
+          child: Text(
+            'Flutter 렌더링 OK\nBuild 47',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
       ),
     );
   }
