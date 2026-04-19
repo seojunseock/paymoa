@@ -7,9 +7,12 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // iOS 18 검은 화면 방지: Flutter 첫 프레임 렌더링 전 window 배경색 지정
-    window?.backgroundColor = UIColor.white
     GeneratedPluginRegistrant.register(with: self)
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // super.application() 이후에 window가 생성됨
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // iOS 18 검은 화면 방지: window 생성 후 배경색 지정
+    window?.backgroundColor = UIColor.white
+    window?.rootViewController?.view.backgroundColor = UIColor.white
+    return result
   }
 }
