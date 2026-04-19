@@ -16,15 +16,21 @@ final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 bool _fatalHandling = false;
 bool _fatalDialogShowing = false;
 
+// 진단용: 초기화 상태 메시지
+String _initStatus = '시작 중...';
+
 // Firebase + 날짜 초기화를 한 번만 실행하는 Future
 final Future<void> _appInitFuture = Future(() async {
+  _initStatus = 'Firebase 초기화 중...';
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   ).timeout(const Duration(seconds: 15), onTimeout: () async {
-    debugPrint('[Firebase] initializeApp timeout - 강제 진행');
+    _initStatus = 'Firebase timeout - 강제 진행';
     return Firebase.app();
   });
+  _initStatus = '날짜 초기화 중...';
   await initializeDateFormatting('ko_KR', null);
+  _initStatus = '완료';
 });
 
 Future<void> main() async {
@@ -251,9 +257,25 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(child: CircularProgressIndicator()),
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFF00), // 진단용 노란색
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: Colors.black),
+            const SizedBox(height: 16),
+            Text(
+              _initStatus,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
