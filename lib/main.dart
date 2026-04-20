@@ -18,8 +18,23 @@ bool _fatalDialogShowing = false;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 진단용: Flutter 렌더링 자체가 되는지 먼저 확인
-  runApp(const _DiagApp());
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 8));
+  } catch (_) {
+    // timeout이든 에러든 무시하고 계속 진행
+  }
+
+  try {
+    await initializeDateFormatting('ko_KR', null);
+  } catch (_) {}
+
+  try {
+    KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
+  } catch (_) {}
+
+  runApp(const _App());
 }
 
 class _App extends StatelessWidget {
@@ -212,30 +227,6 @@ class _App extends StatelessWidget {
   }
 }
 
-// 진단용: Firebase/Kakao 없이 순수 Flutter 렌더링 테스트
-class _DiagApp extends StatelessWidget {
-  const _DiagApp();
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        backgroundColor: Color(0xFF00CC44), // 밝은 초록
-        body: Center(
-          child: Text(
-            'Flutter 렌더링 OK\nBuild 47',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
