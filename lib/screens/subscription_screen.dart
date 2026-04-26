@@ -43,32 +43,18 @@ class PlanInfo {
 const kPlans = [
   PlanInfo(
     tier: PlanTier.free,
-    name: '무료',
+    name: '클래식',
     maxStores: 1,
     maxWorkers: 5,
     monthlyPrice: 0,
   ),
   PlanInfo(
-    tier: PlanTier.classic,
-    name: '클래식',
-    maxStores: 1,
-    maxWorkers: 10,
-    monthlyPrice: 4000,
-  ),
-  PlanInfo(
     tier: PlanTier.pro,
     name: '프로',
-    maxStores: 2,
-    maxWorkers: 25,
-    monthlyPrice: 10000,
-    badge: '추천',
-  ),
-  PlanInfo(
-    tier: PlanTier.business,
-    name: '비즈니스',
-    maxStores: 5,
+    maxStores: 10,
     maxWorkers: 40,
-    monthlyPrice: 19000,
+    monthlyPrice: 4000,
+    badge: '추천',
   ),
 ];
 
