@@ -92,7 +92,7 @@ class _App extends StatelessWidget {
           ),
           iconTheme: IconThemeData(color: cs.onSurface.withOpacity(0.85)),
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: cs.surface,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
@@ -183,7 +183,7 @@ class _App extends StatelessWidget {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           behavior: SnackBarBehavior.fixed,
         ),
-        dialogTheme: DialogTheme(
+        dialogTheme: DialogThemeData(
           backgroundColor: cs.surface,
           surfaceTintColor: Colors.transparent,
           shape:
