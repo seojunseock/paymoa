@@ -46,6 +46,7 @@ import '../screens/join_store_sheet.dart';
 // role / consent
 import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
+import '../ads/ad_service.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -1741,7 +1742,12 @@ class _AppShellState extends State<AppShell> {
                 return Scaffold(
                   body: SafeArea(
                     bottom: false,
-                    child: IndexedStack(index: _tab, children: pages),
+                    child: Column(
+                      children: [
+                        Expanded(child: IndexedStack(index: _tab, children: pages)),
+                        const AdBannerWidget(),
+                      ],
+                    ),
                   ),
                   bottomNavigationBar: NavigationBar(
                     selectedIndex: _tab,
