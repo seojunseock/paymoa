@@ -1,6 +1,7 @@
 // lib/ui/app_shell.dart
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../policies/policy_sheet.dart';
 
 import 'package:flutter/material.dart';
@@ -90,6 +91,19 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _subscribePolicyRestore();
+    _showAppOpenAd();
+  }
+
+  Future<void> _showAppOpenAd() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasOpened = prefs.getBool('alba_has_opened') ?? false;
+    if (!hasOpened) {
+      await prefs.setBool('alba_has_opened', true);
+      return; // 최초 로그인은 광고 없음
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AdService.instance.showInterstitial(onAdClosed: () {});
+    });
   }
 
   void _subscribePolicyRestore() {
@@ -1006,6 +1020,8 @@ class _AppShellState extends State<AppShell> {
           if (user == null) return;
 
           Navigator.of(context).pop();
+
+          await AdService.instance.showRewardAd(onRewarded: () {});
 
           final albaId = await _firebaseService.addPersonalAlba(
             uid: user.uid,
