@@ -24,6 +24,7 @@ import '../../payroll/payroll_document_service.dart';
 import '../../models/ui_calendar_models.dart';
 import '../subscription_screen.dart';
 import '../../subscription/subscription_service.dart';
+import '../../ads/ad_service.dart';
 
 class OwnerStoreDetailScreen extends StatefulWidget {
   const OwnerStoreDetailScreen({
@@ -221,7 +222,12 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                             month: month,
                           );
 
-                      doExport();
+                      final tier = SubscriptionService.instance.cached?.tier ?? PlanTier.free;
+                      if (tier == PlanTier.free) {
+                        AdService.instance.showRewardAd(onRewarded: doExport);
+                      } else {
+                        doExport();
+                      }
                     },
                   ),
 

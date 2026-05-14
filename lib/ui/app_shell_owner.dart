@@ -19,6 +19,7 @@ import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
 import '../screens/subscription_screen.dart';
 import '../subscription/subscription_service.dart';
+import '../ads/ad_service.dart';
 
 const _primary = Pm.primary;
 const _bg = Pm.bg;
@@ -245,6 +246,8 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
         child: Column(
           children: [
             Expanded(child: pages[_index]),
+            if ((SubscriptionService.instance.cached?.tier ?? PlanTier.free) == PlanTier.free)
+              const AdBannerWidget(),
           ],
         ),
       ),

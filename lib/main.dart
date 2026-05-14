@@ -9,6 +9,7 @@ import 'firebase_options.dart';
 import 'role/role_gate.dart';
 import 'screens/terms_screen.dart';
 import 'screens/privacy_policy_screen.dart';
+import 'ads/ad_service.dart';
 
 final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
@@ -32,6 +33,10 @@ Future<void> main() async {
 
   try {
     KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
+  } catch (_) {}
+
+  try {
+    await AdService.instance.initialize();
   } catch (_) {}
 
   runApp(const _App());
