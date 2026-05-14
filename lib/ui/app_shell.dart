@@ -1744,8 +1744,8 @@ class _AppShellState extends State<AppShell> {
                     bottom: false,
                     child: Column(
                       children: [
-                        Expanded(child: IndexedStack(index: _tab, children: pages)),
                         const AdBannerWidget(),
+                        Expanded(child: IndexedStack(index: _tab, children: pages)),
                       ],
                     ),
                   ),

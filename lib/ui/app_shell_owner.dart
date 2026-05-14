@@ -245,9 +245,9 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
         bottom: false,
         child: Column(
           children: [
-            Expanded(child: pages[_index]),
             if ((SubscriptionService.instance.cached?.tier ?? PlanTier.free) == PlanTier.free)
               const AdBannerWidget(),
+            Expanded(child: pages[_index]),
           ],
         ),
       ),
