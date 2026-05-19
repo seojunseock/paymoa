@@ -87,7 +87,7 @@ class _OwnerWorkerCalendarAsAlbaScreenState
               ? worker.workerUid
               : worker.displayName!.trim(),
           hourlyWage: effectiveWage,
-          colorHex: '#3B82F6',
+          colorHex: store.colorHex ?? '#3B82F6',
           payDay: effectivePayDay,
         );
 

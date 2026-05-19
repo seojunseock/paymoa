@@ -170,14 +170,23 @@ class PayrollDocumentService {
       );
 
       // ✅ 선택한 월 안에 "급여일"이 있는 정산기간 찾기
-      final resolved = _resolveTargetPeriodForPayMonth(
-        policy: policy,
-        year: year,
-        month: month,
-      );
-      if (resolved == null) continue;
-
-      final targetPeriod = resolved.period;
+      // 당일급여: period가 하루씩이므로 달력월(1~말일) 전체를 대상으로 처리
+      final PayPeriod targetPeriod;
+      if (policy.cycle == PayCycleType.daily) {
+        final lastDay = DateTime(year, month + 1, 0).day;
+        targetPeriod = PayPeriod(
+          start: DateTime(year, month, 1),
+          end: DateTime(year, month, lastDay),
+        );
+      } else {
+        final resolved = _resolveTargetPeriodForPayMonth(
+          policy: policy,
+          year: year,
+          month: month,
+        );
+        if (resolved == null) continue;
+        targetPeriod = resolved.period;
+      }
 
       // ✅ today/퇴사일 cutoff
       DateTime? workerCutoff = untilDate == null ? null : _dateOnly(untilDate);
@@ -222,21 +231,64 @@ class PayrollDocumentService {
       InsuranceConfig insuranceAtFn(DateTime date) =>
           historySource.insuranceAt(date) ?? insurance;
 
-      final summary = _engine.summaryForDate(
-        policy: policy,
-        alba: alba,
-        schedules: uiSchedules,
-        tax: tax,
-        insurance: insurance,
-        surchargePolicy: surcharge,
-        wageAt: wageAtFn,
-        surchargeAt: surchargeAtFn,
-        taxAt: taxAtFn,
-        insuranceAt: insuranceAtFn,
-        anyDateInPeriod: targetPeriod.start,
-      );
-
       final workedMinutes = _sumWorkedMinutesLikeEngine(filtered);
+
+      // 당일급여: 하루 단위 period이므로 각 날짜별 합산
+      final int rowGross;
+      final int rowNet;
+      final DateTime rowPeriodStart;
+      final DateTime rowPeriodEnd;
+      final DateTime rowPayDate;
+
+      if (policy.cycle == PayCycleType.daily) {
+        final seenDays = <DateTime>{};
+        int gSum = 0;
+        int nSum = 0;
+        for (final s in uiSchedules) {
+          final day = DateTime(s.year, s.month, s.day);
+          if (!seenDays.add(day)) continue;
+          final ds = _engine.summaryForDate(
+            policy: policy,
+            alba: alba,
+            schedules: uiSchedules,
+            tax: tax,
+            insurance: insurance,
+            surchargePolicy: surcharge,
+            wageAt: wageAtFn,
+            surchargeAt: surchargeAtFn,
+            taxAt: taxAtFn,
+            insuranceAt: insuranceAtFn,
+            anyDateInPeriod: day,
+          );
+          gSum += ds.gross;
+          nSum += ds.net;
+        }
+        rowGross = gSum;
+        rowNet = nSum;
+        rowPeriodStart = targetPeriod.start;
+        rowPeriodEnd = targetPeriod.end;
+        final lastDay = DateTime(year, month + 1, 0).day;
+        rowPayDate = DateTime(year, month, effectivePayDay.clamp(1, lastDay));
+      } else {
+        final summary = _engine.summaryForDate(
+          policy: policy,
+          alba: alba,
+          schedules: uiSchedules,
+          tax: tax,
+          insurance: insurance,
+          surchargePolicy: surcharge,
+          wageAt: wageAtFn,
+          surchargeAt: surchargeAtFn,
+          taxAt: taxAtFn,
+          insuranceAt: insuranceAtFn,
+          anyDateInPeriod: targetPeriod.start,
+        );
+        rowGross = summary.gross;
+        rowNet = summary.net;
+        rowPeriodStart = summary.period.start;
+        rowPeriodEnd = summary.period.end;
+        rowPayDate = summary.payDate;
+      }
 
       rows.add(
         PayrollDocumentRow(
@@ -245,16 +297,16 @@ class PayrollDocumentService {
           storeName: store.name,
           workerUid: w.workerUid,
           workerName: (w.displayName ?? w.workerUid),
-          periodStart: summary.period.start,
-          periodEnd: summary.period.end,
-          payDate: summary.payDate,
-          hourlyWage: wageAtFn(w.workerUid, summary.period.start),
+          periodStart: rowPeriodStart,
+          periodEnd: rowPeriodEnd,
+          payDate: rowPayDate,
+          hourlyWage: wageAtFn(w.workerUid, rowPeriodStart),
           workedMinutes: workedMinutes,
           scheduleCount: filtered.length,
-          gross: summary.gross,
-          net: summary.net,
-          tax: taxAtFn(summary.period.start),
-          insurance: insuranceAtFn(summary.period.start),
+          gross: rowGross,
+          net: rowNet,
+          tax: taxAtFn(rowPeriodStart),
+          insurance: insuranceAtFn(rowPeriodStart),
           surcharge: surcharge,
           payrollPolicy: policy,
           changeNotes: _buildChangeNotesForRange(

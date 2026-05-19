@@ -48,6 +48,7 @@ import '../screens/join_store_sheet.dart';
 import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
 import '../ads/ad_service.dart';
+import '../services/update_service.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -92,6 +93,9 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _subscribePolicyRestore();
     _showAppOpenAd();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) UpdateService.instance.checkOnce(context);
+    });
   }
 
   Future<void> _showAppOpenAd() async {
@@ -765,8 +769,6 @@ class _AppShellState extends State<AppShell> {
           final user = FirebaseAuth.instance.currentUser;
           if (user == null) return;
 
-          Navigator.of(context).pop();
-
           try {
             if (!isJoin) {
               final wageChanged = res.hourlyWage != alba.hourlyWage;
@@ -964,11 +966,7 @@ class _AppShellState extends State<AppShell> {
               });
             }
 
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('저장 완료!')),
-              );
-            }
+            if (context.mounted) Navigator.of(context).pop();
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1019,10 +1017,10 @@ class _AppShellState extends State<AppShell> {
           final user = FirebaseAuth.instance.currentUser;
           if (user == null) return;
 
-          Navigator.of(context).pop();
+          final rewarded = await AdService.instance.showRewardAd();
+          if (!rewarded) return; // 리워드 미완료 시 폼 유지
 
-          await AdService.instance.showRewardAd(onRewarded: () {});
-
+          // Firebase 쓰기 완료 후 화면 닫기 (레이스 컨디션 방지)
           final albaId = await _firebaseService.addPersonalAlba(
             uid: user.uid,
             name: res.storeName.trim().isEmpty ? '이름없음' : res.storeName.trim(),
@@ -1065,6 +1063,8 @@ class _AppShellState extends State<AppShell> {
               ),
             );
           }
+
+          if (context.mounted) Navigator.of(context).pop();
         },
       ),
     );

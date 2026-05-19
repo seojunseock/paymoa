@@ -112,41 +112,49 @@ class _JoinStoreSheetState extends State<JoinStoreSheet> {
           (storeName != null && storeName.isNotEmpty) ? storeName : '매장';
 
       // ── 정원 초과 체크 (구독 활성화 시에만) ─────────────────────
+      // 알바생은 workers 컬렉션 읽기 권한이 없으므로 try-catch로 처리
+      // 권한 오류 시 정원 체크 스킵 → 사장님이 대시보드에서 직접 관리
       if (kSubscriptionVisible && kSubscriptionEnabled) {
-        final workersSnap = await db
-            .collection('users')
-            .doc(ownerUid)
-            .collection('stores')
-            .doc(storeId)
-            .collection('workers')
-            .get();
-
-        final activeCount = workersSnap.docs.where((d) {
-          final status = d.data()['status'] as String? ?? '';
-          return status != 'ended' && status != 'deleted';
-        }).length;
-
-        final ownerTier = await SubscriptionService.fetchTierForUid(ownerUid);
-        final planLimit = kPlans
-            .firstWhere((p) => p.tier == ownerTier, orElse: () => kPlans.first)
-            .maxWorkers;
-
-        if (activeCount >= planLimit) {
-          await db
+        try {
+          final workersSnap = await db
               .collection('users')
               .doc(ownerUid)
-              .collection('notifications')
-              .add({
-            'type': 'capacityBlocked',
-            'storeId': storeId,
-            'storeName': name,
-            'createdAt': FieldValue.serverTimestamp(),
-            'read': false,
-          });
+              .collection('stores')
+              .doc(storeId)
+              .collection('workers')
+              .get();
 
-          _setError('이 매장의 정원이 꽉 찼어요.\n사장님께 문의해 주세요.');
-          _setLoading(false);
-          return;
+          final activeCount = workersSnap.docs.where((d) {
+            final status = d.data()['status'] as String? ?? '';
+            return status != 'ended' && status != 'deleted';
+          }).length;
+
+          final ownerTier =
+              await SubscriptionService.fetchTierForUid(ownerUid);
+          final planLimit = kPlans
+              .firstWhere((p) => p.tier == ownerTier,
+                  orElse: () => kPlans.first)
+              .maxWorkers;
+
+          if (activeCount >= planLimit) {
+            await db
+                .collection('users')
+                .doc(ownerUid)
+                .collection('notifications')
+                .add({
+              'type': 'capacityBlocked',
+              'storeId': storeId,
+              'storeName': name,
+              'createdAt': FieldValue.serverTimestamp(),
+              'read': false,
+            });
+
+            _setError('이 매장의 정원이 꽉 찼어요.\n사장님께 문의해 주세요.');
+            _setLoading(false);
+            return;
+          }
+        } catch (_) {
+          // 정원 확인 불가 시 참여 진행 (사장님이 대시보드에서 관리)
         }
       }
       // ────────────────────────────────────────────────────────────

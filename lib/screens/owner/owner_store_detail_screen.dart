@@ -25,6 +25,7 @@ import '../../models/ui_calendar_models.dart';
 import '../subscription_screen.dart';
 import '../../subscription/subscription_service.dart';
 import '../../ads/ad_service.dart';
+import '../../common/common_pickers.dart' as cp;
 
 class OwnerStoreDetailScreen extends StatefulWidget {
   const OwnerStoreDetailScreen({
@@ -97,7 +98,12 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
           ),
         ),
       ),
-      body: StreamBuilder<List<StoreWorker>>(
+      body: Column(
+        children: [
+          if ((SubscriptionService.instance.cached?.tier ?? PlanTier.free) == PlanTier.free)
+            const AdBannerWidget(),
+          Expanded(
+            child: StreamBuilder<List<StoreWorker>>(
         stream: _workerRepo.watchWorkers(
           ownerUid: store.ownerUid,
           storeId: store.id,
@@ -203,6 +209,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                   // ── 문서 받기 ──
                   _DocRow(
                     payDay: store.payDay ?? 15,
+                    payrollPolicy: store.payrollPolicy,
                     onPickDate: () => _pickYearMonthWheel(context),
                     onExport: (type, year, month) async {
                       // 잠긴 알바생 제외: 활성 한도 내 인원 + 내보낸 알바생
@@ -224,7 +231,8 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
 
                       final tier = SubscriptionService.instance.cached?.tier ?? PlanTier.free;
                       if (tier == PlanTier.free) {
-                        AdService.instance.showRewardAd(onRewarded: doExport);
+                        final rewarded = await AdService.instance.showRewardAd();
+                        if (rewarded) doExport();
                       } else {
                         doExport();
                       }
@@ -283,6 +291,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                           isLocked: isLocked,
                           name: _displayName(w),
                           badge: _badgeText(worker: w),
+                          colorHex: store.colorHex ?? '#3B82F6',
                           wageText: '${_comma(payPair.effectiveWage)}원',
                           prevLabel: _payLabel(payPair.prev.payDate),
                           prevValue: '${_comma(payPair.prev.net)}원',
@@ -336,6 +345,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
                             enabled: false,
                             name: _displayName(w),
                             badge: _badgeText(worker: w),
+                            colorHex: store.colorHex ?? '#3B82F6',
                             wageText: '${_comma(payPair.effectiveWage)}원',
                             prevLabel: _payLabel(payPair.prev.payDate),
                             prevValue: '${_comma(payPair.prev.net)}원',
@@ -373,6 +383,9 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
           );
         },
       ),
+    ),
+  ],
+),
     );
   }
 
@@ -849,7 +862,7 @@ class _OwnerStoreDetailScreenState extends State<OwnerStoreDetailScreen> {
       storeId: store.id,
       name: _displayName(worker),
       hourlyWage: effectiveWage,
-      colorHex: 'FF000000',
+      colorHex: store.colorHex ?? '#3B82F6',
       payDay: effectivePayDay,
     );
 
@@ -1259,11 +1272,13 @@ extension _DocTypeLabel on _DocType {
 class _DocRow extends StatefulWidget {
   const _DocRow({
     required this.payDay,
+    required this.payrollPolicy,
     required this.onPickDate,
     required this.onExport,
   });
 
   final int payDay;
+  final PayrollPolicy payrollPolicy;
   final Future<_YearMonth?> Function() onPickDate;
   final Future<void> Function(_DocType type, int year, int month) onExport;
 
@@ -1290,9 +1305,60 @@ class _DocRowState extends State<_DocRow> {
     return widget.payDay.clamp(1, lastDay);
   }
 
+  /// 선택한 급여월(year/month)에 해당하는 실제 정산기간 계산
+  /// - 문서 생성(buildCalendarMonthDocument)과 동일한 로직으로 계산
+  /// - 예: 달력월 + 급여일 15일, 5월 선택 → 4/1~4/30 (급여일 5/15)
+  ({DateTime start, DateTime end}) _calcPeriod() {
+    final policy = widget.payrollPolicy.copyWith(
+      payRule: PayDateRule.nextMonthlyDay(widget.payDay),
+    );
+
+    // 당일급여: 해당 월 전체 표시
+    if (policy.cycle == PayCycleType.daily) {
+      final lastDay = DateTime(_year, _month + 1, 0).day;
+      return (
+        start: DateTime(_year, _month, 1),
+        end: DateTime(_year, _month, lastDay),
+      );
+    }
+
+    // 선택한 월의 급여일에 해당하는 정산기간 탐색 (문서 생성과 동일 로직)
+    final monthStart = DateTime(_year, _month, 1);
+    final monthEnd = DateTime(_year, _month + 1, 0);
+    final scanStart = monthStart.subtract(const Duration(days: 62));
+    final scanEnd = monthEnd.add(const Duration(days: 7));
+    final seen = <String>{};
+
+    for (DateTime d = scanStart;
+        !d.isAfter(scanEnd);
+        d = d.add(const Duration(days: 1))) {
+      final preview = computePreviewForDate(policy: policy, anyDateInPeriod: d);
+      final key =
+          '${preview.period.start.year}-${preview.period.start.month}-${preview.period.start.day}'
+          '_${preview.period.end.year}-${preview.period.end.month}-${preview.period.end.day}';
+      if (!seen.add(key)) continue;
+      if (preview.payDate.year == _year && preview.payDate.month == _month) {
+        return (start: preview.period.start, end: preview.period.end);
+      }
+    }
+
+    // fallback: 해당 월 1일~말일
+    final lastDay = DateTime(_year, _month + 1, 0).day;
+    return (
+      start: DateTime(_year, _month, 1),
+      end: DateTime(_year, _month, lastDay),
+    );
+  }
+
+  String _periodLabel() {
+    final p = _calcPeriod();
+    return '${p.start.month}/${p.start.day} ~ ${p.end.month}/${p.end.day}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final payDay = _displayPayDay();
+    final periodLabel = _periodLabel();
 
     return Container(
       decoration: BoxDecoration(
@@ -1311,6 +1377,7 @@ class _DocRowState extends State<_DocRow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── 급여월 선택 ──
           GestureDetector(
             onTap: _pickDate,
             child: Container(
@@ -1324,15 +1391,30 @@ class _DocRowState extends State<_DocRow> {
                   const Icon(Icons.calendar_month_outlined,
                       size: 17, color: Color(0xFF7C3AED)),
                   const SizedBox(width: 8),
-                  Text(
-                    '$_year년 $_month월 · $payDay일 급여일',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF3B0764),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$_year년 $_month월 · $payDay일 급여일',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF3B0764),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '근무기간: $periodLabel',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF7C3AED),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const Spacer(),
                   const Icon(Icons.expand_more,
                       size: 18, color: Color(0xFF7C3AED)),
                 ],
@@ -1340,6 +1422,7 @@ class _DocRowState extends State<_DocRow> {
             ),
           ),
           const SizedBox(height: 10),
+          // ── 문서 유형 탭 ──
           Row(
             children: [
               for (final t in _DocType.values) ...[
@@ -1374,6 +1457,7 @@ class _DocRowState extends State<_DocRow> {
             ],
           ),
           const SizedBox(height: 10),
+          // ── 문서받기 버튼 (근무기간 표시) ──
           GestureDetector(
             onTap: () => widget.onExport(_docType, _year, _month),
             child: Container(
@@ -1389,15 +1473,16 @@ class _DocRowState extends State<_DocRow> {
                   ),
                 ],
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.download_rounded, size: 18, color: Colors.white),
-                  SizedBox(width: 6),
+                  const Icon(Icons.download_rounded,
+                      size: 18, color: Colors.white),
+                  const SizedBox(width: 6),
                   Text(
-                    '문서받기',
-                    style: TextStyle(
-                      fontSize: 15,
+                    '$_month월 문서받기',
+                    style: const TextStyle(
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),
@@ -1479,6 +1564,7 @@ class _WorkerSimpleCard extends StatefulWidget {
     required this.enabled,
     required this.name,
     required this.badge,
+    required this.colorHex,
     required this.wageText,
     required this.prevLabel,
     required this.prevValue,
@@ -1496,6 +1582,7 @@ class _WorkerSimpleCard extends StatefulWidget {
   final bool isLocked;
   final String name;
   final String badge;
+  final String colorHex;
   final String wageText;
   final String prevLabel;
   final String prevValue;
@@ -1514,6 +1601,8 @@ class _WorkerSimpleCard extends StatefulWidget {
 class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
   bool _expanded = false;
   static const _purple = Color(0xFF7C3AED);
+
+  Color get _storeColor => cp.parseColor(widget.colorHex);
 
   @override
   Widget build(BuildContext context) {
@@ -1637,14 +1726,14 @@ class _WorkerSimpleCardState extends State<_WorkerSimpleCard> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: _purple.withOpacity(0.08),
+                    color: _storeColor.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(widget.badge,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _purple)),
+                          color: _storeColor)),
                 ),
               ]),
               subtitle: Padding(

@@ -20,6 +20,7 @@ import '../role/consent_repository.dart';
 import '../screens/subscription_screen.dart';
 import '../subscription/subscription_service.dart';
 import '../ads/ad_service.dart';
+import '../services/update_service.dart';
 
 const _primary = Pm.primary;
 const _bg = Pm.bg;
@@ -41,6 +42,9 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
   void initState() {
     super.initState();
     _initSubscription();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) UpdateService.instance.checkOnce(context);
+    });
   }
 
   Future<void> _initSubscription() async {
@@ -245,8 +249,11 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
         bottom: false,
         child: Column(
           children: [
-            if ((SubscriptionService.instance.cached?.tier ?? PlanTier.free) == PlanTier.free)
-              const AdBannerWidget(),
+            ValueListenableBuilder<PlanTier>(
+              valueListenable: SubscriptionService.instance.tierNotifier,
+              builder: (_, tier, __) =>
+                  tier == PlanTier.free ? const AdBannerWidget() : const SizedBox.shrink(),
+            ),
             Expanded(child: pages[_index]),
           ],
         ),

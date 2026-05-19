@@ -426,20 +426,20 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                         ),
                       ),
                       trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: AppWords.delete,
-                                  icon: const Icon(Icons.delete_outline,
-                                      color: PaymoaColors.error),
-                                  onPressed: () => widget.onDelete(s.id),
-                                ),
-                                TextButton(
-                                  onPressed: () => widget.onEdit(s.id),
-                                  child: const Text(AppWords.edit),
-                                ),
-                              ],
-                            ),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: AppWords.delete,
+                            icon: const Icon(Icons.delete_outline,
+                                color: PaymoaColors.error),
+                            onPressed: () => widget.onDelete(s.id),
+                          ),
+                          TextButton(
+                            onPressed: () => widget.onEdit(s.id),
+                            child: const Text(AppWords.edit),
+                          ),
+                        ],
+                      ),
                     );
                   }).toList(),
                 ],
@@ -886,7 +886,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
           initial: initial,
           editingAlbaId: null,
           onBack: () => Navigator.pop(context),
-          onSubmit: (r) => Navigator.pop(context, r),
+          onSubmit: (r) async => Navigator.pop(context, r),
         ),
       ),
     );
@@ -1232,8 +1232,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
         ymDate: ymDate,
         schedules: monthSchedules,
         tax: _taxAtOf(alba.id)?.call(monthStart) ?? _taxOf(alba.id),
-        insurance:
-            _insAtOf(alba.id)?.call(monthStart) ?? _insOf(alba.id),
+        insurance: _insAtOf(alba.id)?.call(monthStart) ?? _insOf(alba.id),
         policy: sur,
         surchargeAt: surchargeAt,
         wageAt: _wageAtFn,
@@ -1246,8 +1245,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     final summary = const PayrollEngine().summaryForDate(
       policy: payroll,
       alba: alba,
-      schedules:
-          widget.schedules.where((s) => s.albaId == alba.id).toList(),
+      schedules: widget.schedules.where((s) => s.albaId == alba.id).toList(),
       tax: _taxOf(alba.id),
       insurance: _insOf(alba.id),
       surchargePolicy: sur,
@@ -1277,10 +1275,9 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
 
   /// D-day 텍스트 (D-7, D-Day, D+1 …)
   String _dDayText(DateTime payDate) {
-    final today = DateTime(
-        DateTime.now().year, DateTime.now().month, DateTime.now().day);
-    final target =
-        DateTime(payDate.year, payDate.month, payDate.day);
+    final today =
+        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final target = DateTime(payDate.year, payDate.month, payDate.day);
     final diff = target.difference(today).inDays;
     if (diff == 0) return 'D-Day';
     if (diff > 0) return 'D-$diff';
@@ -1476,11 +1473,9 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
                                     return const SizedBox.shrink();
                                   }
                                   final dday = _dDayText(payDate);
-                                  final ddayColor = dday == 'D-Day'
-                                      ? const Color(0xFF7C3AED)
-                                      : dday.startsWith('D-')
-                                          ? const Color(0xFF059669)
-                                          : PaymoaColors.textSecondary;
+                                  final ddayColor = dday.startsWith('D+')
+                                      ? PaymoaColors.textSecondary
+                                      : color;
                                   return Padding(
                                     padding:
                                         const EdgeInsets.symmetric(vertical: 4),
