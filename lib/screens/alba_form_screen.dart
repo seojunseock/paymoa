@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
+import '../ads/ad_service.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../models/alba_form_models.dart';
@@ -28,7 +29,7 @@ class AlbaFormScreen extends StatefulWidget {
   final String? editingAlbaId;
 
   final VoidCallback onBack;
-  final void Function(AlbaFormResult result) onSubmit;
+  final Future<void> Function(AlbaFormResult result) onSubmit;
 
   @override
   State<AlbaFormScreen> createState() => _AlbaFormScreenState();
@@ -71,6 +72,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   late PayrollPolicy _payrollPolicy;
 
   bool _payrollConfirmed = false;
+  bool _saving = false;
 
   String _storeId = '';
   bool _inheritFromStore = true;
@@ -454,6 +456,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   }
 
   Future<void> _onSubmit() async {
+    if (_saving) return;
     _dismissKeyboard();
 
     final name = _name.text.trim();
@@ -491,6 +494,14 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     if (newWage <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('시급을 입력해 주세요.')),
+      );
+      return;
+    }
+
+    // 직접 등록(개인 알바)은 날짜 필수, 매장 조인은 선택
+    if (_selected.isEmpty && _storeId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('근무 날짜를 선택해 주세요.')),
       );
       return;
     }
@@ -623,7 +634,12 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       policyEffectiveFrom: policyEffectiveFrom,
       surchargeEffectiveFrom: surchargeEffectiveFrom,
     );
-    widget.onSubmit(result);
+    setState(() => _saving = true);
+    try {
+      await widget.onSubmit(result);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   int _deriveLegacyPayDay(PayrollPolicy p) {
@@ -669,20 +685,34 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         ),
         centerTitle: true,
         actions: [
-          TextButton(
-            onPressed: _onSubmit,
-            child: const Text(
-              '저장',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-                color: Color(0xFF7C3AED),
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _onSubmit,
+              child: const Text(
+                '저장',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: Color(0xFF7C3AED),
+                ),
               ),
             ),
-          ),
         ],
       ),
-      body: GestureDetector(
+      body: Column(
+        children: [
+          const AdBannerWidget(),
+          Expanded(
+            child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: _dismissKeyboard,
         child: ListView(
@@ -1090,6 +1120,9 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
           ],
         ),
       ),
+    ),
+  ],
+),
     );
   }
 

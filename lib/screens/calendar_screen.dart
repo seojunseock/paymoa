@@ -350,7 +350,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
       widget.albas.length,
       Object.hashAll(widget.albas.map((a) => a.id)),
       widget.schedules.length,
-      Object.hashAll(widget.schedules.map((s) => s.id)),
+      Object.hashAll(widget.schedules.map((s) =>
+          '${s.id}_${s.startHour}_${s.startMinute}_${s.endHour}_${s.endMinute}_${s.breakMinutes}_${s.workType.name}')),
     );
   }
 

@@ -1,19 +1,29 @@
 // lib/subscription/subscription_service.dart
-//
-// 구독 상태 관리 (RevenueCat 제거됨 - 추후 재연동 예정)
-//
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../screens/subscription_screen.dart';
+import '../services/promo_service.dart';
+
+// ─────────────────────────────────────────
+// RevenueCat API 키 (등록 후 교체)
+// ─────────────────────────────────────────
+const _rcAndroidKey = 'goog_ALUYwdkPcoDpZBDsoamZJcCKwpQ';
+const _rcIosKey     = 'REVENUECAT_IOS_KEY_HERE';
+
+/// RevenueCat Entitlement ID (RevenueCat 대시보드에서 설정한 이름과 동일해야 함)
+const _proEntitlement = 'pro';
 
 // ─────────────────────────────────────────
 // 구독 상태
 // ─────────────────────────────────────────
 enum SubscriptionStatus {
   active,       // 정상 구독 중
-  gracePeriod,  // 결제 문제 감지, 유예기간 중 — 기능 전체 유지
-  expired,      // 유예기간 종료 → 무료 플랜으로 자동 다운그레이드
-  free,         // 구독 없음 (무료 플랜)
+  gracePeriod,  // 결제 문제 감지, 유예기간 중
+  expired,      // 유예기간 종료 → 무료로 다운그레이드
+  free,         // 구독 없음
 }
 
 // ─────────────────────────────────────────
@@ -39,10 +49,7 @@ class SubscriptionInfo {
 
   int get remainingGraceDays {
     if (gracePeriodEndsAt == null) return 0;
-    return gracePeriodEndsAt!
-        .difference(DateTime.now())
-        .inDays
-        .clamp(0, 3);
+    return gracePeriodEndsAt!.difference(DateTime.now()).inDays.clamp(0, 3);
   }
 }
 
@@ -55,12 +62,15 @@ class SubscriptionService {
 
   SubscriptionInfo? _cached;
   bool _initialized = false;
-  final bool _shouldShowWarning = false;
+
+  /// 구독 tier 변경 시 UI에 즉시 반영
+  final tierNotifier = ValueNotifier<PlanTier>(PlanTier.free);
 
   SubscriptionInfo? get cached => _cached;
-  bool get shouldShowBillingWarning => _shouldShowWarning;
+  bool get shouldShowBillingWarning =>
+      _cached?.status == SubscriptionStatus.gracePeriod;
 
-  // ── 초기화 (앱 시작 / 로그인 시 1회) ────
+  // ── 초기화 (앱 시작 / 로그인 시 1회) ──
   Future<void> init(String uid) async {
     if (!kSubscriptionEnabled) {
       _cached = const SubscriptionInfo(
@@ -72,33 +82,106 @@ class SubscriptionService {
     if (_initialized) return;
     _initialized = true;
 
-    // RevenueCat 제거됨: 항상 무료 플랜
-    _cached = const SubscriptionInfo(
-      status: SubscriptionStatus.free,
-      tier: PlanTier.free,
-    );
+    // 프로모 코드로 pro 지급된 경우
+    if (PromoService.instance.isProGranted) {
+      _cached = const SubscriptionInfo(
+        status: SubscriptionStatus.active,
+        tier: PlanTier.pro,
+      );
+      return;
+    }
+
+    try {
+      await Purchases.setLogLevel(LogLevel.error);
+      final config = PurchasesConfiguration(
+        Platform.isIOS ? _rcIosKey : _rcAndroidKey,
+      )..appUserID = uid;
+      await Purchases.configure(config);
+      await _syncFromRevenueCat();
+    } catch (_) {
+      _cached ??= const SubscriptionInfo(
+        status: SubscriptionStatus.free,
+        tier: PlanTier.free,
+      );
+    }
   }
 
-  // ── 수동 갱신 ─
+  // ── RevenueCat에서 구독 상태 동기화 ──
+  Future<void> _syncFromRevenueCat() async {
+    try {
+      final info = await Purchases.getCustomerInfo();
+      _applyCustomerInfo(info);
+    } catch (_) {
+      _cached ??= const SubscriptionInfo(
+        status: SubscriptionStatus.free,
+        tier: PlanTier.free,
+      );
+    }
+  }
+
+  void _applyCustomerInfo(CustomerInfo info) {
+    final isPro = info.entitlements.active.containsKey(_proEntitlement);
+    _cached = SubscriptionInfo(
+      status: isPro ? SubscriptionStatus.active : SubscriptionStatus.free,
+      tier: isPro ? PlanTier.pro : PlanTier.free,
+    );
+    tierNotifier.value = _cached!.tier;
+  }
+
+  // ── 수동 갱신 ──
   Future<SubscriptionInfo> refresh(String uid) async {
     if (!kSubscriptionEnabled) return _cached!;
-    _initialized = false;
-    _cached = const SubscriptionInfo(
-      status: SubscriptionStatus.free,
-      tier: PlanTier.free,
-    );
+    await _syncFromRevenueCat();
     return _cached!;
   }
 
-  // ── 로그아웃 시 세션 초기화 ──────────────
+  // ── 프로 구독 구매 (할인 코드 적용 시 discountProductId 전달) ──
+  Future<bool> purchasePro({String? discountProductId}) async {
+    try {
+      final offerings = await Purchases.getOfferings();
+      final current = offerings.current;
+      if (current == null || current.availablePackages.isEmpty) return false;
+
+      // 할인 상품 ID가 있으면 해당 상품 우선, 없으면 pro 포함 상품
+      final package = current.availablePackages.firstWhere(
+        (p) => discountProductId != null
+            ? p.storeProduct.identifier == discountProductId
+            : p.storeProduct.identifier.contains('pro'),
+        orElse: () => current.availablePackages.firstWhere(
+          (p) => p.storeProduct.identifier.contains('pro'),
+          orElse: () => current.availablePackages.first,
+        ),
+      );
+
+      final info = await Purchases.purchasePackage(package);
+      _applyCustomerInfo(info);
+      return _cached?.tier == PlanTier.pro;
+    } on PurchasesError catch (e) {
+      if (e.code == PurchasesErrorCode.purchaseCancelledError) return false;
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── 구매 복원 ──
+  Future<bool> restorePurchases() async {
+    try {
+      final info = await Purchases.restorePurchases();
+      _applyCustomerInfo(info);
+      return _cached?.tier == PlanTier.pro;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── 로그아웃 시 세션 초기화 ──
   void clearSession() {
     _initialized = false;
     _cached = null;
   }
 
-  // ─────────────────────────────────────────
-  // 다른 사용자(사장님)의 tier 조회 — join_store_sheet 등에서 사용
-  // ─────────────────────────────────────────
+  // ── 다른 사용자(사장님)의 tier 조회 ──
   static Future<PlanTier> fetchTierForUid(String uid) async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -106,18 +189,9 @@ class SubscriptionService {
           .doc(uid)
           .get();
       final tierStr = doc.data()?['subscriptionTier'] as String? ?? 'free';
-      return instance._tierFromString(tierStr);
+      return tierStr == 'pro' ? PlanTier.pro : PlanTier.free;
     } catch (_) {
       return PlanTier.free;
-    }
-  }
-
-  PlanTier _tierFromString(String s) {
-    switch (s) {
-      case 'classic': return PlanTier.classic;
-      case 'pro': return PlanTier.pro;
-      case 'business': return PlanTier.business;
-      default: return PlanTier.free;
     }
   }
 }

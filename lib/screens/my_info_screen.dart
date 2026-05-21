@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
+import '../services/promo_service.dart';
 
 class MyInfoMonthlyNetPoint {
   final int year;
@@ -238,6 +239,8 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
         children: [
           _buildIncomeCard(),
           const SizedBox(height: 16),
+          _buildPromoCard(),
+          const SizedBox(height: 12),
           _buildPolicyCard(),
           const SizedBox(height: 12),
           _buildFaqSupportCard(),
@@ -521,6 +524,29 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
     );
   }
 
+  Widget _buildPromoCard() {
+    final applied = PromoService.instance.isAdFree;
+    return _InfoCard(children: [
+      _InfoTile(
+        icon: Icons.card_giftcard_outlined,
+        label: applied ? '프로모션 코드 적용됨' : '프로모션 코드 입력',
+        trailing: applied
+            ? const Icon(Icons.check_circle_rounded,
+                color: Color(0xFF7C3AED), size: 20)
+            : null,
+        onTap: applied ? null : () => _showPromoDialog(context),
+      ),
+    ]);
+  }
+
+  Future<void> _showPromoDialog(BuildContext context) async {
+    final ctrl = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _PromoDialog(ctrl: ctrl),
+    );
+  }
+
   Widget _buildPolicyCard() {
     return _InfoCard(children: [
       _InfoTile(
@@ -615,6 +641,7 @@ class _InfoTile extends StatelessWidget {
     this.onTap,
     this.iconColor,
     this.labelColor,
+    this.trailing,
   });
 
   final IconData icon;
@@ -622,6 +649,7 @@ class _InfoTile extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? iconColor;
   final Color? labelColor;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -647,14 +675,127 @@ class _InfoTile extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 20,
-              color: ic.withOpacity(0.4),
-            ),
+            trailing ??
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: ic.withOpacity(0.4),
+                ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── 프로모션 코드 다이얼로그 ──
+class _PromoDialog extends StatefulWidget {
+  const _PromoDialog({required this.ctrl});
+  final TextEditingController ctrl;
+
+  @override
+  State<_PromoDialog> createState() => _PromoDialogState();
+}
+
+class _PromoDialogState extends State<_PromoDialog> {
+  bool _loading = false;
+  String? _msg;
+  bool _success = false;
+
+  Future<void> _apply() async {
+    final code = widget.ctrl.text.trim();
+    if (code.isEmpty) return;
+    setState(() { _loading = true; _msg = null; });
+
+    final result = await PromoService.instance.applyCode(code);
+    if (!mounted) return;
+
+    setState(() {
+      _loading = false;
+      switch (result) {
+        case PromoResult.success:
+          _success = true;
+          _msg = '코드가 적용됐어요! 광고가 제거됩니다.';
+        case PromoResult.discount:
+          _msg = '유효하지 않은 코드예요.'; // 알바 쪽에선 할인 코드 미지원
+        case PromoResult.already:
+          _msg = '이미 적용된 코드예요.';
+        case PromoResult.invalid:
+          _msg = '유효하지 않은 코드예요.';
+        case PromoResult.error:
+          _msg = '오류가 발생했어요. 다시 시도해주세요.';
+      }
+    });
+
+    if (_success) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text(
+        '프로모션 코드',
+        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: widget.ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: '코드를 입력해주세요',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: Color(0xFF7C3AED), width: 2),
+              ),
+            ),
+            onSubmitted: (_) => _apply(),
+          ),
+          if (_msg != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _msg!,
+              style: TextStyle(
+                fontSize: 13,
+                color: _success
+                    ? const Color(0xFF7C3AED)
+                    : const Color(0xFFEF4444),
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소',
+              style: TextStyle(color: Color(0xFF6B7280))),
+        ),
+        TextButton(
+          onPressed: _loading ? null : _apply,
+          child: _loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Color(0xFF7C3AED)),
+                )
+              : const Text('적용',
+                  style: TextStyle(
+                      color: Color(0xFF7C3AED),
+                      fontWeight: FontWeight.w700)),
+        ),
+      ],
     );
   }
 }

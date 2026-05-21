@@ -157,10 +157,15 @@ int computeSinglePay({
   final baseWage = s.overrideHourlyWage ??
       (wageAt?.call(alba.id, scheduleDate) ?? alba.hourlyWage);
 
+  // ✅ 보너스 배율 적용 (1.0이면 그대로)
+  final effectiveWage = s.wageMultiplier != 1.0
+      ? (baseWage * s.wageMultiplier).round()
+      : baseWage;
+
   final totalMin = end.difference(start).inMinutes;
   final workedMin = max(0, totalMin - s.breakMinutes.clamp(0, 1440));
 
-  final basePay = (baseWage * workedMin / 60.0).round();
+  final basePay = (effectiveWage * workedMin / 60.0).round();
 
   int overtimePay = 0, nightPay = 0, holidayPay = 0;
 
@@ -169,9 +174,8 @@ int computeSinglePay({
     final overtimeMin = _overtimeMinutes(
       policy: effectivePolicy,
       workedMin: workedMin,
-      // weeklyOver40는 추후 period/week 집계 기반으로 확장
     );
-    overtimePay = (baseWage *
+    overtimePay = (effectiveWage *
             (effectivePolicy.overtimePercent / 100.0) *
             overtimeMin /
             60.0)
@@ -182,14 +186,14 @@ int computeSinglePay({
   if (effectivePolicy.nightEnabled) {
     final nightMin = _overlapMinutesWithNight(start, end);
     nightPay =
-        (baseWage * (effectivePolicy.nightPercent / 100.0) * nightMin / 60.0)
+        (effectiveWage * (effectivePolicy.nightPercent / 100.0) * nightMin / 60.0)
             .round();
   }
 
-  // ✅ 휴일근로(“휴일=일요일 고정” 제거)
+  // ✅ 휴일근로
   if (effectivePolicy.holidayEnabled) {
     holidayPay = _holidayPremiumPay(
-      baseWage: baseWage,
+      baseWage: effectiveWage,
       start: start,
       end: end,
       policy: effectivePolicy,

@@ -197,10 +197,16 @@ class PayrollEngine {
 
       final ws =
           weeklyScheduleMap[segmentStart] ?? const <UICalendarSchedule>[];
-      final overrides =
-          ws.map((s) => s.overrideHourlyWage).whereType<int>().toList();
-      final refWage = overrides.isNotEmpty
-          ? (overrides.reduce((a, b) => a + b) / overrides.length).round()
+      // 배율 적용 실효 시급 평균 (wageMultiplier 반영, 주휴는 미반영과 다름)
+      final effectiveWages = ws.map((s) {
+        final base = s.overrideHourlyWage ??
+            (wageAt?.call(alba.id, DateTime(s.year, s.month, s.day)) ??
+                alba.hourlyWage);
+        return (base * s.wageMultiplier).round();
+      }).toList();
+      final refWage = effectiveWages.isNotEmpty
+          ? (effectiveWages.reduce((a, b) => a + b) / effectiveWages.length)
+              .round()
           : (wageAt?.call(alba.id, segmentStart) ?? alba.hourlyWage);
 
       gross +=

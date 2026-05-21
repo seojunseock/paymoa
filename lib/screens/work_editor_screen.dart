@@ -97,6 +97,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
   bool _saving = false;
   _WorkType _workType = _WorkType.basic;
   int? _overrideWage;
+  double _wageMultiplier = 1.0;
 
   bool get _hasAlbas => widget.albas.isNotEmpty;
 
@@ -160,6 +161,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
         _originalDate = DateTime(s.year, s.month, s.day);
         _workType = _mapBackToWorkType(s.workType);
         _overrideWage = s.overrideHourlyWage;
+        _wageMultiplier = s.wageMultiplier;
       }
     }
   }
@@ -265,8 +267,9 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
     final res = await showDateAssignSheet(
       context,
       existing: _selectedUtcDates,
+      // 다른 알바 겹치는 날만 차단, 같은 알바 겹침은 허용
       checkConflict: (utc) =>
-          _hasAnyConflictOn(DateTime(utc.year, utc.month, utc.day)),
+          _hasOtherAlbaConflictOn(DateTime(utc.year, utc.month, utc.day)),
     );
     if (!mounted || res == null) return;
 
@@ -275,47 +278,83 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
 
   /* ───────────────── Conflict Check ───────────────── */
 
-  bool _hasAnyConflictOn(DateTime localDay) {
+  List<UICalendarSchedule> _byYmd(DateTime x) => widget.schedules
+      .where((s) => s.year == x.year && s.month == x.month && s.day == x.day)
+      .toList();
+
+  bool _isEditingSchedule(UICalendarSchedule sc) {
+    if (_editingScheduleId != null && sc.id == _editingScheduleId) return true;
+    if (_editingDocPath != null && sc.docPath == _editingDocPath) return true;
+    return false;
+  }
+
+  bool _overlapsNewTime(UICalendarSchedule sc, int dayOffset) {
     final sMin0 = _startH * 60 + _startM;
     var eMin0 = _endH * 60 + _endM;
     if (eMin0 <= sMin0) eMin0 += 24 * 60;
-
-    bool overlapWith(List<UICalendarSchedule> list, int dayOffset) {
-      for (final sc in list) {
-        if (_editingScheduleId != null && sc.id == _editingScheduleId) continue;
-
-        var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60;
-        var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60;
-        if (b <= a) b += 24 * 60;
-
-        if (sMin0 < b && a < eMin0) return true;
-      }
-      return false;
-    }
-
-    List<UICalendarSchedule> byYmd(DateTime x) => widget.schedules
-        .where((s) => s.year == x.year && s.month == x.month && s.day == x.day)
-        .toList();
-
-    final same = byYmd(localDay);
-    final prev =
-        byYmd(DateTime(localDay.year, localDay.month, localDay.day - 1));
-    final next =
-        byYmd(DateTime(localDay.year, localDay.month, localDay.day + 1));
-
-    return overlapWith(same, 0) ||
-        overlapWith(prev, -1) ||
-        overlapWith(next, 1);
+    var a = sc.startHour * 60 + sc.startMinute + dayOffset * 24 * 60;
+    var b = sc.endHour * 60 + sc.endMinute + dayOffset * 24 * 60;
+    if (b <= a) b += 24 * 60;
+    return sMin0 < b && a < eMin0;
   }
 
-  List<DateTime> _collectConflictDays() {
+  // 다른 알바가 겹치는지 (달력 피커에서 차단용)
+  bool _hasOtherAlbaConflictOn(DateTime localDay) {
+    final prev = DateTime(localDay.year, localDay.month, localDay.day - 1);
+    final next = DateTime(localDay.year, localDay.month, localDay.day + 1);
+    for (final entry in [
+      (_byYmd(localDay), 0),
+      (_byYmd(prev), -1),
+      (_byYmd(next), 1),
+    ]) {
+      for (final sc in entry.$1) {
+        if (_isEditingSchedule(sc)) continue;
+        if (sc.albaId == _selectedAlbaId) continue; // 같은 알바 → 차단 안 함
+        if (_overlapsNewTime(sc, entry.$2)) return true;
+      }
+    }
+    return false;
+  }
+
+  // 같은 알바가 겹치는 스케줄 목록 (저장 시 교체용)
+  List<UICalendarSchedule> _sameAlbaConflictsOn(DateTime localDay) {
+    final result = <UICalendarSchedule>[];
+    final prev = DateTime(localDay.year, localDay.month, localDay.day - 1);
+    final next = DateTime(localDay.year, localDay.month, localDay.day + 1);
+    for (final entry in [
+      (_byYmd(localDay), 0),
+      (_byYmd(prev), -1),
+      (_byYmd(next), 1),
+    ]) {
+      for (final sc in entry.$1) {
+        if (_isEditingSchedule(sc)) continue;
+        if (sc.albaId != _selectedAlbaId) continue;
+        if (_overlapsNewTime(sc, entry.$2)) result.add(sc);
+      }
+    }
+    return result;
+  }
+
+  // 저장 시 다른 알바 충돌 날짜
+  List<DateTime> _collectOtherAlbaConflictDays() {
     final hits = <DateTime>[];
     for (final utc in _selectedUtcDates) {
       final local = DateTime(utc.year, utc.month, utc.day);
-      if (_hasAnyConflictOn(local)) hits.add(local);
+      if (_hasOtherAlbaConflictOn(local)) hits.add(local);
     }
     hits.sort((a, b) => a.compareTo(b));
     return hits;
+  }
+
+  // 저장 시 같은 알바 충돌 날짜 + 스케줄
+  Map<DateTime, List<UICalendarSchedule>> _collectSameAlbaConflicts() {
+    final result = <DateTime, List<UICalendarSchedule>>{};
+    for (final utc in _selectedUtcDates) {
+      final local = DateTime(utc.year, utc.month, utc.day);
+      final conflicts = _sameAlbaConflictsOn(local);
+      if (conflicts.isNotEmpty) result[local] = conflicts;
+    }
+    return result;
   }
 
   /* ───────────────── Save / Delete ───────────────── */
@@ -384,15 +423,21 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       return;
     }
 
-    final conflicts = _collectConflictDays();
-    if (conflicts.isNotEmpty) {
-      final msg = conflicts.map(_ymd).join(', ');
+    // 1. 다른 알바 충돌 → 차단
+    final otherConflicts = _collectOtherAlbaConflictDays();
+    if (otherConflicts.isNotEmpty) {
+      final dateList = otherConflicts.map(_ymd).join('\n');
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text(AppWords.workConflictTitle),
+          title: const Text('다른 근무가 있어 저장이 어렵습니다'),
           content: Text(
-            '${AppWords.workConflictBodyPrefix}$msg${AppWords.workConflictBodySuffix}',
+            dateList,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280),
+            ),
           ),
           actions: [
             TextButton(
@@ -404,6 +449,46 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
       );
       if (!mounted) return;
       return;
+    }
+
+    // 2. 같은 알바 충돌 → 교체 확인
+    final sameConflicts = _collectSameAlbaConflicts();
+    if (sameConflicts.isNotEmpty) {
+      final dateList = sameConflicts.keys
+          .toList()
+        ..sort((a, b) => a.compareTo(b));
+      final dateStr = dateList.map(_ymd).join('\n');
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('기존 근무가 있어요'),
+          content: Text('같은 알바의 근무가 있는 날이에요.\n기존 근무를 새 근무로 교체할까요?\n\n$dateStr'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(AppWords.cancel),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                '교체하기',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: Color(0xFF7C3AED)),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (replace != true) return;
+
+      // 겹치는 기존 근무 삭제
+      for (final schedules in sameConflicts.values) {
+        for (final sc in schedules) {
+          await widget.onDelete(sc.id);
+        }
+      }
+      if (!mounted) return;
     }
 
     setState(() => _saving = true);
@@ -431,6 +516,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
             breakMinutes: _breakMin,
             workType: _mapWorkType(_workType),
             overrideHourlyWage: resolvedWage,
+            wageMultiplier: _wageMultiplier,
             docPath: _editingDocPath,
           ),
         );
@@ -453,6 +539,7 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
               breakMinutes: _breakMin,
               workType: _mapWorkType(_workType),
               overrideHourlyWage: resolvedWage,
+              wageMultiplier: _wageMultiplier,
             ),
           );
         }
@@ -611,6 +698,14 @@ class _WorkEditorSheetState extends State<_WorkEditorSheet> {
                                 onTap: _pickBreak,
                               ),
                             ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _TossCard(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                          child: _BonusMultiplierSection(
+                            value: _wageMultiplier,
+                            onChanged: (v) => setState(() => _wageMultiplier = v),
                           ),
                         ),
                       ],
@@ -1060,6 +1155,173 @@ class _WageOptionTile extends StatelessWidget {
             ),
             if (trailing != null) trailing!,
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/* ───────────────── 보너스 배율 섹션 ───────────────── */
+
+class _BonusMultiplierSection extends StatefulWidget {
+  const _BonusMultiplierSection({
+    required this.value,
+    required this.onChanged,
+  });
+  final double value;
+  final void Function(double) onChanged;
+
+  @override
+  State<_BonusMultiplierSection> createState() =>
+      _BonusMultiplierSectionState();
+}
+
+class _BonusMultiplierSectionState extends State<_BonusMultiplierSection> {
+  static const _presets = [1.0, 1.5, 2.0];
+  bool _isCustom = false;
+  final _ctrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _isCustom = !_presets.contains(widget.value);
+    if (_isCustom) _ctrl.text = widget.value.toString();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _selectPreset(double v) {
+    setState(() => _isCustom = false);
+    widget.onChanged(v);
+  }
+
+  void _onCustomChanged(String s) {
+    final v = double.tryParse(s);
+    if (v != null && v >= 1.0) widget.onChanged(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFF7C3AED);
+    final cur = widget.value;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.star_rounded, size: 18, color: Color(0xFFF59E0B)),
+            const SizedBox(width: 6),
+            const Text('보너스',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            if (cur != 1.0)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '×${cur % 1 == 0 ? cur.toInt() : cur}',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: primary),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final p in _presets)
+              _MultiplierChip(
+                label: p == 1.0 ? '기본' : '${p}배',
+                selected: !_isCustom && cur == p,
+                onTap: () => _selectPreset(p),
+              ),
+            _MultiplierChip(
+              label: '직접입력',
+              selected: _isCustom,
+              onTap: () => setState(() {
+                _isCustom = true;
+                _ctrl.text =
+                    cur == 1.0 ? '' : (cur % 1 == 0 ? '${cur.toInt()}' : '$cur');
+              }),
+            ),
+          ],
+        ),
+        if (_isCustom) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 100,
+                height: 40,
+                child: TextField(
+                  controller: _ctrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    hintText: '예) 1.3',
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: primary),
+                    ),
+                  ),
+                  onChanged: _onCustomChanged,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text('배',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _MultiplierChip extends StatelessWidget {
+  const _MultiplierChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFF7C3AED);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? primary : const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : const Color(0xFF374151),
+          ),
         ),
       ),
     );

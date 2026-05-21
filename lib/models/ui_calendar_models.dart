@@ -127,6 +127,9 @@ class UICalendarSchedule {
   /// 해당 근무만 시급 오버라이드(선택)
   final int? overrideHourlyWage;
 
+  /// 보너스 시급 배율 (기본 1.0, 1.5배/2배 등)
+  final double wageMultiplier;
+
   /// ✅ (핵심) Firestore 문서 경로
   /// - 개인 스케줄: users/{uid}/mySchedules/{id}
   /// - 조인 스케줄: users/{ownerUid}/stores/{storeId}/schedules/{id}
@@ -147,7 +150,8 @@ class UICalendarSchedule {
     required this.breakMinutes,
     this.workType = WorkType.basic,
     this.overrideHourlyWage,
-    this.docPath, // ✅ 추가
+    this.wageMultiplier = 1.0,
+    this.docPath,
   });
 
   bool get countsForWeeklyHoliday => workType.countsForWeeklyHoliday;
@@ -169,6 +173,7 @@ class UICalendarSchedule {
     WorkType? workType,
     int? overrideHourlyWage,
     bool resetOverrideHourlyWage = false,
+    double? wageMultiplier,
     String? docPath,
   }) {
     return UICalendarSchedule(
@@ -186,6 +191,7 @@ class UICalendarSchedule {
       overrideHourlyWage: resetOverrideHourlyWage
           ? null
           : (overrideHourlyWage ?? this.overrideHourlyWage),
+      wageMultiplier: wageMultiplier ?? this.wageMultiplier,
       docPath: docPath ?? this.docPath,
     );
   }

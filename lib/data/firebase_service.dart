@@ -1074,17 +1074,23 @@ class FirebaseService {
       final startKey = _dateKey(start.year, start.month, start.day);
       q = _mySchedulesRef(workerUid)
           .where('dateKey', isGreaterThanOrEqualTo: startKey)
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+          .orderBy('dateKey', descending: false);
     } else {
-      q = _mySchedulesRef(workerUid)
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+      q = _mySchedulesRef(workerUid).orderBy('dateKey', descending: false);
     }
 
-    return q
-        .snapshots()
-        .map((qs) => qs.docs.map(_uiFromPersonalDoc).toList(growable: false));
+    return q.snapshots().map((qs) {
+      final items = qs.docs.map(_uiFromPersonalDoc).toList();
+      items.sort((a, b) {
+        final da = a.year * 10000 + a.month * 100 + a.day;
+        final db = b.year * 10000 + b.month * 100 + b.day;
+        if (da != db) return da.compareTo(db);
+        final sa = a.startHour * 60 + a.startMinute;
+        final sb = b.startHour * 60 + b.startMinute;
+        return sa.compareTo(sb);
+      });
+      return items;
+    });
   }
 
   /// ✅ 조인 스케줄 구독 (알바생)
@@ -1145,14 +1151,19 @@ class FirebaseService {
             ? base
                 .where('dateKey', isGreaterThanOrEqualTo: startKey)
                 .orderBy('dateKey', descending: false)
-                .orderBy('startMin', descending: false)
-            : base
-                .orderBy('dateKey', descending: false)
-                .orderBy('startMin', descending: false);
+            : base.orderBy('dateKey', descending: false);
 
         perStoreSubs[key] = q.snapshots().listen((qs) {
-          latestByStore[key] =
-              qs.docs.map(_uiFromJoinGroupDoc).toList(growable: false);
+          final items = qs.docs.map(_uiFromJoinGroupDoc).toList();
+          items.sort((a, b) {
+            final da = a.year * 10000 + a.month * 100 + a.day;
+            final db = b.year * 10000 + b.month * 100 + b.day;
+            if (da != db) return da.compareTo(db);
+            final sa = a.startHour * 60 + a.startMinute;
+            final sb = b.startHour * 60 + b.startMinute;
+            return sa.compareTo(sb);
+          });
+          latestByStore[key] = items;
           emit();
         });
       }
@@ -1277,6 +1288,7 @@ class FirebaseService {
       'breakMinutes': ui.breakMinutes,
       'workType': ui.workType.name,
       'overrideHourlyWage': ui.overrideHourlyWage,
+      'wageMultiplier': ui.wageMultiplier == 1.0 ? null : ui.wageMultiplier,
       'dateKey': dateKey,
       'startMin': startMin,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -1327,6 +1339,7 @@ class FirebaseService {
       'breakMinutes': ui.breakMinutes,
       'workType': ui.workType.name,
       'overrideHourlyWage': ui.overrideHourlyWage,
+      'wageMultiplier': ui.wageMultiplier == 1.0 ? null : ui.wageMultiplier,
       'dateKey': dateKey,
       'startMin': startMin,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -1559,6 +1572,7 @@ class FirebaseService {
       breakMinutes: (d['breakMinutes'] as num?)?.toInt() ?? 0,
       workType: _workTypeFromString((d['workType'] as String?) ?? 'basic'),
       overrideHourlyWage: (d['overrideHourlyWage'] as num?)?.toInt(),
+      wageMultiplier: (d['wageMultiplier'] as num?)?.toDouble() ?? 1.0,
       docPath: doc.reference.path,
     );
   }
@@ -1584,6 +1598,7 @@ class FirebaseService {
       breakMinutes: (d['breakMinutes'] as num?)?.toInt() ?? 0,
       workType: _workTypeFromString((d['workType'] as String?) ?? 'basic'),
       overrideHourlyWage: (d['overrideHourlyWage'] as num?)?.toInt(),
+      wageMultiplier: (d['wageMultiplier'] as num?)?.toDouble() ?? 1.0,
       docPath: doc.reference.path,
     );
   }
@@ -1743,16 +1758,23 @@ class FirebaseService {
       final startKey = _dateKey(start.year, start.month, start.day);
       q = ref
           .where('dateKey', isGreaterThanOrEqualTo: startKey)
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+          .orderBy('dateKey', descending: false);
     } else {
-      q = ref
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+      q = ref.orderBy('dateKey', descending: false);
     }
 
-    return q.snapshots().map(
-        (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
+    return q.snapshots().map((qs) {
+      final items = qs.docs.map(StoreSchedule.fromDoc).toList();
+      items.sort((a, b) {
+        final da = a.year * 10000 + a.month * 100 + a.day;
+        final db = b.year * 10000 + b.month * 100 + b.day;
+        if (da != db) return da.compareTo(db);
+        final sa = a.startHour * 60 + a.startMinute;
+        final sb = b.startHour * 60 + b.startMinute;
+        return sa.compareTo(sb);
+      });
+      return items;
+    });
   }
 
   /// ✅ 특정 근무자 스케줄 read-only 구독
@@ -1776,16 +1798,23 @@ class FirebaseService {
       final startKey = _dateKey(start.year, start.month, start.day);
       q = base
           .where('dateKey', isGreaterThanOrEqualTo: startKey)
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+          .orderBy('dateKey', descending: false);
     } else {
-      q = base
-          .orderBy('dateKey', descending: false)
-          .orderBy('startMin', descending: false);
+      q = base.orderBy('dateKey', descending: false);
     }
 
-    return q.snapshots().map(
-        (qs) => qs.docs.map(StoreSchedule.fromDoc).toList(growable: false));
+    return q.snapshots().map((qs) {
+      final items = qs.docs.map(StoreSchedule.fromDoc).toList();
+      items.sort((a, b) {
+        final da = a.year * 10000 + a.month * 100 + a.day;
+        final db = b.year * 10000 + b.month * 100 + b.day;
+        if (da != db) return da.compareTo(db);
+        final sa = a.startHour * 60 + a.startMinute;
+        final sb = b.startHour * 60 + b.startMinute;
+        return sa.compareTo(sb);
+      });
+      return items;
+    });
   }
 
   /// ✅ 기간 조회 (급여 계산용)
@@ -1942,12 +1971,19 @@ class FirebaseService {
           final q = _storeSchedulesRef(ownerUid: ownerUid, storeId: store.id)
               .where('dateKey', isGreaterThanOrEqualTo: startKey)
               .where('dateKey', isLessThanOrEqualTo: endKey)
-              .orderBy('dateKey', descending: false)
-              .orderBy('startMin', descending: false);
+              .orderBy('dateKey', descending: false);
 
           scheduleSubs[store.id] = q.snapshots().listen((snap) {
-            latestSchedulesByStore[store.id] =
-                snap.docs.map(StoreSchedule.fromDoc).toList(growable: false);
+            final items = snap.docs.map(StoreSchedule.fromDoc).toList();
+            items.sort((a, b) {
+              final da = a.year * 10000 + a.month * 100 + a.day;
+              final db = b.year * 10000 + b.month * 100 + b.day;
+              if (da != db) return da.compareTo(db);
+              final sa = a.startHour * 60 + a.startMinute;
+              final sb = b.startHour * 60 + b.startMinute;
+              return sa.compareTo(sb);
+            });
+            latestSchedulesByStore[store.id] = items;
             if (!controller.isClosed) {
               controller.add(buildPoints());
             }

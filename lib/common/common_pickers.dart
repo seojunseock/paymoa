@@ -633,7 +633,7 @@ Future<Set<DateTime>?> showAlbaDatePickerDialog(
 }) {
   return showDialog<Set<DateTime>>(
     context: context,
-    barrierDismissible: true,
+    barrierDismissible: false,
     builder: (_) => _AlbaMultiDateDialog(
       initialUtc: initialUtc ?? <DateTime>{},
       focused: initialFocusedDay ?? DateTime.now(),
@@ -1477,6 +1477,7 @@ class _WorkTimePickerState extends State<_WorkTimePicker> {
                         key: ValueKey('hour-$_tab'),
                         scrollController: _hourCtrl,
                         itemExtent: 50,
+                        looping: true,
                         selectionOverlay:
                             const CupertinoPickerDefaultSelectionOverlay(
                           capStartEdge: false,
@@ -1513,6 +1514,7 @@ class _WorkTimePickerState extends State<_WorkTimePicker> {
                         key: ValueKey('min-$_tab'),
                         scrollController: _minCtrl,
                         itemExtent: 50,
+                        looping: true,
                         selectionOverlay: const _PickerOverlay(capStart: false),
                         onSelectedItemChanged: (i) {
                           setState(() {

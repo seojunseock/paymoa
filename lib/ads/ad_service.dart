@@ -72,9 +72,9 @@ class AdService {
     await ad.show();
   }
 
-  // ── 리워드광고 표시 (보상 지급 후 onRewarded 실행) ──
-  Future<void> showRewardAd({required VoidCallback onRewarded}) async {
-    final completer = Completer<void>();
+  // ── 리워드광고 표시 → 끝까지 시청하면 true, 그렇지 않으면 false ──
+  Future<bool> showRewardAd() async {
+    final completer = Completer<bool>();
     RewardedAd.load(
       adUnitId: _rewardId,
       request: const AdRequest(),
@@ -84,24 +84,25 @@ class AdService {
           ad.fullScreenContentCallback = FullScreenContentCallback(
             onAdDismissedFullScreenContent: (a) {
               a.dispose();
-              if (rewarded) onRewarded();
-              if (!completer.isCompleted) completer.complete();
+              if (!completer.isCompleted) completer.complete(rewarded);
             },
             onAdFailedToShowFullScreenContent: (a, _) {
               a.dispose();
-              onRewarded();
-              if (!completer.isCompleted) completer.complete();
+              if (!completer.isCompleted) completer.complete(false);
             },
           );
           ad.show(onUserEarnedReward: (_, __) => rewarded = true);
         },
         onAdFailedToLoad: (_) {
-          onRewarded();
-          if (!completer.isCompleted) completer.complete();
+          if (!completer.isCompleted) completer.complete(true); // 로드 실패 시 동작 허용
         },
       ),
     );
-    return completer.future;
+    // 10초 안에 광고 응답 없으면 바로 통과
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => true,
+    );
   }
 
   // ── 배너광고 위젯 ──

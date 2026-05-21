@@ -10,6 +10,7 @@ import 'role/role_gate.dart';
 import 'screens/terms_screen.dart';
 import 'screens/privacy_policy_screen.dart';
 import 'ads/ad_service.dart';
+import 'services/promo_service.dart';
 
 final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
@@ -34,6 +35,8 @@ Future<void> main() async {
   try {
     KakaoSdk.init(nativeAppKey: '53dfe716642af3a731da9865a25e5db6');
   } catch (_) {}
+
+  await PromoService.instance.init();
 
   try {
     await AdService.instance.initialize();
