@@ -155,6 +155,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
   pol.InsuranceConfig _ins = const pol.InsuranceNone();
   pol.SurchargePolicy _surcharge = const pol.SurchargePolicy();
 
+  // ── 변경 감지용 초기값
+  int? _initialWage;
+  pol.TaxConfig? _initialTax;
+  pol.InsuranceConfig? _initialIns;
+  pol.SurchargePolicy? _initialSurcharge;
+
   late PayrollPolicy _payrollPolicy;
   bool _saving = false;
   bool _formattingWage = false;
@@ -204,6 +210,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
       _ins = s.insuranceConfig;
       _surcharge = s.surchargePolicy;
       _payrollPolicy = s.payrollPolicy;
+
+      // 변경 감지용 초기값 저장
+      _initialWage = s.defaultHourlyWage;
+      _initialTax = s.taxConfig;
+      _initialIns = s.insuranceConfig;
+      _initialSurcharge = s.surchargePolicy;
 
       final policy =
           (s.policy ?? const <String, dynamic>{}).cast<String, dynamic>();
@@ -312,6 +324,61 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
     if (!mounted) return;
     if (!ok) return;
 
+    // ── 수정 모드: 돈 관련 변경 시 적용 시작일 선택
+    DateTime? effectiveFrom;
+    if (_isEdit) {
+      final today = DateTime.now();
+      final todayDate = DateTime(today.year, today.month, today.day);
+      final wageChanged = _initialWage != null && wage != _initialWage;
+      final taxChanged = _initialTax != null && _tax != _initialTax;
+      final insChanged = _initialIns != null && _ins != _initialIns;
+      final surchargeChanged = _initialSurcharge != null &&
+          _surcharge != _initialSurcharge;
+      if (wageChanged || taxChanged || insChanged || surchargeChanged) {
+        final picked = await cp.showSingleDatePickerDialog(
+          context,
+          initialDate: todayDate,
+          firstDay: DateTime(2020),
+          lastDay: todayDate.add(const Duration(days: 365)),
+        );
+        if (!mounted) return;
+        if (picked == null) return;
+        effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+
+        final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
+        final lines = <String>[];
+        if (wageChanged) lines.add('· 시급은 $dateLabel부터 적용됩니다.');
+        if (taxChanged || insChanged) lines.add('· 세금·보험은 $dateLabel부터 적용됩니다.');
+        if (surchargeChanged) lines.add('· 가산정책은 $dateLabel부터 적용됩니다.');
+
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('적용 시작일 안내',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+            content: Text(lines.join('\n\n'),
+                style: const TextStyle(fontSize: 14, color: Color(0xFF374151))),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('취소',
+                    style: TextStyle(color: Color(0xFF6B7280))),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('확인',
+                    style: TextStyle(fontWeight: FontWeight.w700,
+                        color: Color(0xFF111827))),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        if (confirmed != true) return;
+      }
+    }
+
     setState(() => _saving = true);
 
     try {
@@ -324,9 +391,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
           defaultHourlyWage: wage,
           payDay: _legacyPayDay(_payrollPolicy),
           policy: _policyToMap(),
+          effectiveFrom: effectiveFrom,
         );
         if (!mounted) return;
-        _snack('수정 완료!');
+        _snack(effectiveFrom != null
+            ? '${effectiveFrom.month}/${effectiveFrom.day}부터 적용돼요.'
+            : '수정 완료!');
         Navigator.of(context).pop(true);
         return;
       }

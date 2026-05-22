@@ -13,6 +13,7 @@ import '../../data/firebase_service.dart';
 import '../../policies/policies.dart' as pol;
 import '../../policies/policy_sheet.dart';
 import '../../policies/policy_mapper.dart' as pm;
+import '../../common/common_pickers.dart' as cp;
 
 const _bg = Color(0xFFF8F7FF);
 const _textPrimary = Pm.textPrimary;
@@ -340,15 +341,8 @@ class _OwnerWorkerFormScreenState extends State<OwnerWorkerFormScreen> {
     }
 
     final now = DateTime.now();
-    final DateTime effectiveFrom = DateTime(now.year, now.month, now.day);
-
-    // 세금·보험 적용 시작일: 오늘이 1일이면 이번 달 1일, 아니면 다음 달 1일
-    final int nm = now.month == 12 ? 1 : now.month + 1;
-    final int ny = now.month == 12 ? now.year + 1 : now.year;
-    final DateTime taxInsEffective =
-        now.day == 1 ? DateTime(now.year, now.month, 1) : DateTime(ny, nm, 1);
-    final String taxInsLabel =
-        now.day == 1 ? '이번 달(${now.month}월 1일)' : '다음 달(${nm}월 1일)';
+    final today = DateTime(now.year, now.month, now.day);
+    DateTime effectiveFrom = today;
 
     final bool wageWillChange =
         !_inheritFromStore && _initialWage != null && wage != _initialWage;
@@ -357,16 +351,28 @@ class _OwnerWorkerFormScreenState extends State<OwnerWorkerFormScreen> {
     final bool policyWillChange = taxInsWillChange || surchargeWillChange;
 
     if (wageWillChange || policyWillChange) {
-      // 다이얼로그 안내 문구 조립
+      // 1. 적용 시작일 선택
+      final picked = await cp.showSingleDatePickerDialog(
+        context,
+        initialDate: today,
+        firstDay: DateTime(2020),
+        lastDay: today.add(const Duration(days: 365)),
+      );
+      if (!mounted) return;
+      if (picked == null) return;
+      effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+
+      // 2. 확인 다이얼로그
+      final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
       final lines = <String>[];
       if (wageWillChange) {
-        lines.add('· 시급은 오늘(${effectiveFrom.month}/${effectiveFrom.day})부터 적용됩니다.');
+        lines.add('· 시급은 $dateLabel부터 적용됩니다.');
       }
       if (surchargeWillChange) {
-        lines.add('· 가산정책(주휴·연장 등)은 오늘(${effectiveFrom.month}/${effectiveFrom.day})부터 적용됩니다.');
+        lines.add('· 가산정책(주휴·연장 등)은 $dateLabel부터 적용됩니다.');
       }
       if (taxInsWillChange) {
-        lines.add('· 세금·보험은 $taxInsLabel부터 적용됩니다.');
+        lines.add('· 세금·보험은 $dateLabel부터 적용됩니다.');
       }
 
       final confirmed = await showDialog<bool>(
@@ -433,13 +439,13 @@ class _OwnerWorkerFormScreenState extends State<OwnerWorkerFormScreen> {
       final DateTime? policyEffectiveFrom;
       final DateTime? surchargeEffectiveFrom;
       if (taxInsWillChange && surchargeWillChange) {
-        policyEffectiveFrom = taxInsEffective; // 세금/보험 날짜
-        surchargeEffectiveFrom = effectiveFrom; // 가산정책은 오늘
+        policyEffectiveFrom = effectiveFrom;
+        surchargeEffectiveFrom = effectiveFrom;
       } else if (taxInsWillChange) {
-        policyEffectiveFrom = taxInsEffective;
+        policyEffectiveFrom = effectiveFrom;
         surchargeEffectiveFrom = null;
       } else if (surchargeWillChange) {
-        policyEffectiveFrom = effectiveFrom; // 오늘 즉시
+        policyEffectiveFrom = effectiveFrom;
         surchargeEffectiveFrom = null;
       } else {
         policyEffectiveFrom = null;
@@ -478,13 +484,7 @@ class _OwnerWorkerFormScreenState extends State<OwnerWorkerFormScreen> {
       }
 
       if (!mounted) return;
-      if (taxInsWillChange && surchargeWillChange) {
-        _snack('가산정책은 오늘, 세금·보험은 $taxInsLabel부터 적용돼요.');
-      } else if (taxInsWillChange) {
-        _snack('세금·보험은 $taxInsLabel부터 적용돼요.');
-      } else {
-        _snack('오늘(${effectiveFrom.month}/${effectiveFrom.day})부터 적용돼요.');
-      }
+      _snack('${effectiveFrom.month}/${effectiveFrom.day}부터 적용돼요.');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;

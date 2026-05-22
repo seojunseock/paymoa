@@ -316,6 +316,7 @@ class FirebaseService {
     int? defaultHourlyWage,
     int? payDay,
     Map<String, dynamic>? policy,
+    DateTime? effectiveFrom,
   }) async {
     final id = uid.trim();
     final sid = storeId.trim();
@@ -364,11 +365,11 @@ class FirebaseService {
       }
     }
 
-    final effectiveDate = _dateOnly(DateTime.now());
+    final effectiveDate = _dateOnly(effectiveFrom ?? DateTime.now());
     final effectiveDateStr = _ymdStr(effectiveDate);
 
     // ✅ 매장 정책 변경 이력 저장 (매장 doc에도)
-    if (policy != null) {
+    if (policy != null || defaultHourlyWage != null) {
       Map<String, dynamic>? baseline;
       final existingStorePH = current['policyHistory'];
       if (!_hasPolicyHistory(existingStorePH)) {
@@ -385,7 +386,8 @@ class FirebaseService {
         existingHistoryRaw: existingStorePH,
         baseline: baseline,
         changed: {
-          ...policy,
+          if (policy != null) ...policy,
+          if (defaultHourlyWage != null) 'hourlyWage': defaultHourlyWage,
           'effectiveFrom': effectiveDateStr,
         },
       );

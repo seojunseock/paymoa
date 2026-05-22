@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "1020893766243-f2ddh6127voig8mbgqic50mchq1mb9pc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paymoa.app",
+            "certificate_hash": "5c3f98fb4ec84497ee9757897a73ece5ba2f69c9"
+          }
+        },
+        {
           "client_id": "1020893766243-vee1pgecolararg02p3fe13vvjt9qujm.apps.googleusercontent.com",
           "client_type": 3
         }

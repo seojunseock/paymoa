@@ -147,36 +147,46 @@ class PayrollEngine {
         wageAt: wageAt,
         surchargeAt: surchargeAt,
       );
+      final sundayKey = _sundayOf(DateTime(s.year, s.month, s.day));
 
-      // ✅ 주40 연장 계산용: 전체 근무시간 유지
+      // ✅ 주40 연장 계산용: 전체 근무시간 유지 (segment 기준)
       weeklyWorkedMinutes[segmentStart] =
           (weeklyWorkedMinutes[segmentStart] ?? 0) + workedMin;
       (weeklyScheduleMap[segmentStart] ??= <UICalendarSchedule>[]).add(s);
 
-      // ✅ 주휴 계산용: 카운트 대상 근무만 포함
+      // ✅ 주휴 계산용: basic 근무만, 주 전체(일요일 key) 기준
       if (s.workType == WorkType.basic) {
-        weeklyHolidayEligibleMinutes[segmentStart] =
-            (weeklyHolidayEligibleMinutes[segmentStart] ?? 0) + workedMin;
-        (weeklyHolidayScheduleMap[segmentStart] ??= <UICalendarSchedule>[])
+        weeklyHolidayEligibleMinutes[sundayKey] =
+            (weeklyHolidayEligibleMinutes[sundayKey] ?? 0) + workedMin;
+        (weeklyHolidayScheduleMap[sundayKey] ??= <UICalendarSchedule>[])
             .add(s);
-        (weeklyHolidayWorkDays[segmentStart] ??= <String>{})
+        (weeklyHolidayWorkDays[sundayKey] ??= <String>{})
             .add(_ymdOf(schStart));
       }
     }
 
-    // ✅ 주휴수당 - basic 근무만, 일~토 segment 기준 계산
-    weeklyHolidayEligibleMinutes.forEach((segmentStart, mins) {
-      final weekPolicy = surchargeAt?.call(segmentStart) ?? surchargePolicy;
-      if (!weekPolicy.weeklyHolidayEnabled) return;
+    // ✅ 주휴수당 - 주 전체(일~토) 기준, 법적 계산: Σ(근무시간×시급) / 총근무시간
+    weeklyHolidayEligibleMinutes.forEach((sundayKey, mins) {
       if (mins < 15 * 60) return;
+      final saturday = sundayKey.add(const Duration(days: 6));
+      final weekPolicy = surchargeAt?.call(saturday) ?? surchargePolicy;
+      if (!weekPolicy.weeklyHolidayEnabled) return;
 
-      final ws = weeklyHolidayScheduleMap[segmentStart] ??
+      final ws = weeklyHolidayScheduleMap[sundayKey] ??
           const <UICalendarSchedule>[];
-      final overrides =
-          ws.map((s) => s.overrideHourlyWage).whereType<int>().toList();
-      final refWage = overrides.isNotEmpty
-          ? (overrides.reduce((a, b) => a + b) / overrides.length).round()
-          : (wageAt?.call(alba.id, segmentStart) ?? alba.hourlyWage);
+      int totalWageMin = 0, totalMin = 0;
+      for (final sch in ws) {
+        final schDate = DateTime(sch.year, sch.month, sch.day);
+        final wage = sch.overrideHourlyWage ??
+            wageAt?.call(alba.id, schDate) ?? alba.hourlyWage;
+        final (st, en) = _scheduleRange(sch);
+        final wMin = _workedMinutes(st, en, sch.breakMinutes);
+        totalWageMin += wage * wMin;
+        totalMin += wMin;
+      }
+      final refWage = totalMin > 0
+          ? (totalWageMin / totalMin).round()
+          : (wageAt?.call(alba.id, sundayKey) ?? alba.hourlyWage);
 
       final paidMinutes = weekPolicy.weeklyHolidayUseFixedMinutes
           ? weekPolicy.weeklyHolidayFixedMinutes
@@ -185,7 +195,7 @@ class PayrollEngine {
       gross += (refWage * (paidMinutes / 60)).round();
     });
 
-    // ✅ 주 40시간 초과 연장수당 - 기존처럼 전체 근무시간 기준
+    // ✅ 주 40시간 초과 연장수당 - segment 기준, 가중 평균 시급
     weeklyWorkedMinutes.forEach((segmentStart, totalMins) {
       final weekPolicy = surchargeAt?.call(segmentStart) ?? surchargePolicy;
       if (!weekPolicy.overtimeEnabled ||
@@ -197,16 +207,19 @@ class PayrollEngine {
 
       final ws =
           weeklyScheduleMap[segmentStart] ?? const <UICalendarSchedule>[];
-      // 배율 적용 실효 시급 평균 (wageMultiplier 반영, 주휴는 미반영과 다름)
-      final effectiveWages = ws.map((s) {
-        final base = s.overrideHourlyWage ??
-            (wageAt?.call(alba.id, DateTime(s.year, s.month, s.day)) ??
-                alba.hourlyWage);
-        return (base * s.wageMultiplier).round();
-      }).toList();
-      final refWage = effectiveWages.isNotEmpty
-          ? (effectiveWages.reduce((a, b) => a + b) / effectiveWages.length)
-              .round()
+      int totalWageMin = 0, totalMin = 0;
+      for (final sch in ws) {
+        final schDate = DateTime(sch.year, sch.month, sch.day);
+        final base = sch.overrideHourlyWage ??
+            wageAt?.call(alba.id, schDate) ?? alba.hourlyWage;
+        final wage = (base * sch.wageMultiplier).round();
+        final (st, en) = _scheduleRange(sch);
+        final wMin = _workedMinutes(st, en, sch.breakMinutes);
+        totalWageMin += wage * wMin;
+        totalMin += wMin;
+      }
+      final refWage = totalMin > 0
+          ? (totalWageMin / totalMin).round()
           : (wageAt?.call(alba.id, segmentStart) ?? alba.hourlyWage);
 
       gross +=

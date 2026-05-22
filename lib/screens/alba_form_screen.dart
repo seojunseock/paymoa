@@ -553,7 +553,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
 
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
-    final taxInsEffective = DateTime(todayDate.year, todayDate.month + 1, 1);
+    DateTime effectiveFrom = todayDate;
 
     final bool wageChanged =
         _isEdit && _initialWage != null && newWage != _initialWage;
@@ -561,12 +561,25 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     final bool taxInsChanged = _isEdit && _taxInsChanged();
 
     if (wageChanged || surchargeChanged || taxInsChanged) {
+      // 1. 적용 시작일 선택
+      final picked = await cp.showSingleDatePickerDialog(
+        context,
+        initialDate: todayDate,
+        firstDay: DateTime(2020),
+        lastDay: todayDate.add(const Duration(days: 365)),
+      );
+      if (!mounted) return;
+      if (picked == null) return;
+      effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+
+      // 2. 확인 다이얼로그
+      final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
       final lines = <String>[];
       if (wageChanged || surchargeChanged) {
-        lines.add('시급·가산정책은 오늘(${_fmtYmdLocal(todayDate)})부터 적용됩니다.');
+        lines.add('시급·가산정책은 $dateLabel부터 적용됩니다.');
       }
       if (taxInsChanged) {
-        lines.add('세금·보험은 ${_fmtYmdLocal(taxInsEffective)}부터 적용됩니다.');
+        lines.add('세금·보험은 $dateLabel부터 적용됩니다.');
       }
       final confirmed = await showDialog<bool>(
         context: context,
@@ -606,9 +619,9 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       if (confirmed != true) return;
     }
 
-    final DateTime? wageEffectiveFrom = wageChanged ? todayDate : null;
-    final DateTime? policyEffectiveFrom = taxInsChanged ? taxInsEffective : null;
-    final DateTime? surchargeEffectiveFrom = surchargeChanged ? todayDate : null;
+    final DateTime? wageEffectiveFrom = wageChanged ? effectiveFrom : null;
+    final DateTime? policyEffectiveFrom = taxInsChanged ? effectiveFrom : null;
+    final DateTime? surchargeEffectiveFrom = surchargeChanged ? effectiveFrom : null;
 
     final isNewJoinFinal = !_isEdit && _storeId.isNotEmpty;
     final result = AlbaFormResult(

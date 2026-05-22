@@ -34,7 +34,25 @@
       "WebFetch(domain:www.bacancytechnology.com)",
       "WebFetch(domain:stackoverflow.com)",
       "WebFetch(domain:groups.google.com)",
-      "WebFetch(domain:docs.outlast.io)"
+      "WebFetch(domain:docs.outlast.io)",
+      "WebFetch(domain:ioscoachfrank.com)",
+      "WebFetch(domain:sigidhanafi.medium.com)",
+      "WebFetch(domain:www.dhiwise.com)",
+      "Bash(gh run:*)",
+      "Bash(where gh:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(python3:*)",
+      "Bash(python -c \"from PIL import Image; img = Image.open\\(''/c/dev/paycount/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png''\\); print\\(img.size\\)\")",
+      "Bash(grep -r \"purchases_flutter\\\\|billing\" /c/dev/paycount/android/ --include=*.gradle --include=*.kts --include=*.properties)",
+      "Bash(grep -r purchases /c/dev/paycount/android/ --include=*.gradle --include=*.kts --include=*.xml --include=*.settings)",
+      "WebFetch(domain:blog.codemagic.io)",
+      "Bash(head -10 grep -n \"AdBannerWidget\\\\|AdService\" /c/dev/paycount/lib/ui/app_shell_owner.dart)",
+      "Bash(head -10 grep -n \"AdBannerWidget\\\\|AdService\" /c/dev/paycount/lib/ui/app_shell.dart)",
+      "Bash(firebase deploy:*)",
+      "Bash(powershell -Command \"Set-Location 'C:\\\\dev\\\\paycount'; flutter build appbundle --release 2>&1\")",
+      "Bash(Get-Content \"C:\\\\Users\\\\seo03\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--dev-paycount\\\\f6f43104-bbd0-4434-9818-fd81f8b14163\\\\tasks\\\\bsu0wednr.output\" -Wait -Tail 5 2>&1)",
+      "Bash(\"C:/dev/paycount/iOS_BLACK_SCREEN_DEBUG.md\")",
+      "Bash(git:*)"
     ]
   }
 }

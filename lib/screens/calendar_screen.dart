@@ -2029,12 +2029,21 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                 for (final s in lines)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 2),
-                    child: Text(
-                      '${_timeRangeText(s.startHour, s.startMinute, s.endHour, s.endMinute)}  ·  ${_workTypeLabel(s.workType)}${s.wageMultiplier != 1.0 ? '  ·  보너스${_fmtMultiplier(s.wageMultiplier)}' : ''}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withOpacity(0.70),
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${_timeRangeText(s.startHour, s.startMinute, s.endHour, s.endMinute)}  ·  ${_workTypeLabel(s.workType)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withOpacity(0.70),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (s.wageMultiplier != 1.0)
+                          _SurchargeBadge(
+                            label: '보너스 ${_fmtMultiplier(s.wageMultiplier)}',
+                            color: widget.color,
+                          ),
+                      ],
                     ),
                   ),
               ],
@@ -2072,11 +2081,20 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 0),
                     dense: true,
-                    title: Text(
-                      '$st~$et (${_workTypeLabel(s.workType)})${s.wageMultiplier != 1.0 ? '  ·  보너스${_fmtMultiplier(s.wageMultiplier)}' : ''}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    title: Row(
+                      children: [
+                        Text(
+                          '$st~$et (${_workTypeLabel(s.workType)})',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (s.wageMultiplier != 1.0)
+                          _SurchargeBadge(
+                            label: '보너스 ${_fmtMultiplier(s.wageMultiplier)}',
+                            color: widget.color,
+                          ),
+                      ],
                     ),
                     trailing: widget.readOnly
                         ? null
