@@ -89,37 +89,19 @@ Xcode 열리면:
 
 ---
 
-## 4. iOS 검은 화면 이슈 (빌드 47까지 미해결)
+## 4. iOS 검은 화면 이슈 — 내일 최우선 목표
 
-### 현재까지 시도한 것
-- Impeller 비활성화 (`FLTEnableImpeller = false`) → 효과 없음
-- Flutter 렌더링 자체 불가 (Dart 코드 실행 전 문제)
-- iPhone 16 Pro, iOS 18.x, TestFlight에서만 발생
+> 상세 내용: `iOS_BLACK_SCREEN_DEBUG.md` 먼저 열 것
 
-### Mac에서 시도할 것 (순서대로)
-```bash
-# 1. Flutter 버전 업그레이드 시도
-flutter upgrade
-flutter --version  # 버전 기록해두기
+### 목표
+TestFlight에서 화면이 나오면 즉시 종료 → 안드로이드 작업 복귀
 
-# 2. iOS 클린 빌드
-flutter clean
-cd ios && pod install && cd ..
-flutter build ios --release
+### 순서
+1. `flutter upgrade` → `pod install` → Xcode Archive → TestFlight
+2. 화면 나오면 끝
+3. 안 나오면 Xcode 콘솔 로그 → Claude Code에 붙여넣기
 
-# 3. Xcode에서 직접 Archive
-# Product → Archive → Distribute App → App Store Connect
-```
-
-### Xcode 콘솔 로그 확인 (핵심)
-- iPhone 연결 → Xcode → **Window** → **Devices and Simulators**
-- 기기 선택 → **Open Console** → 앱 실행하면서 에러 메시지 확인
-- "dyld", "crash", "signal" 키워드 찾기
-
-### 체크포인트
-- [ ] Xcode 빌드 로그에서 warning/error 확인
-- [ ] Archive 후 TestFlight 업로드
-- [ ] 검은 화면 재현 여부 확인
+- [ ] TestFlight 화면 확인
 
 ---
 
