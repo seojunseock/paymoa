@@ -105,7 +105,8 @@ class _OwnerWorkerCalendarAsAlbaScreenState
                 endMinute: s.endMinute,
                 breakMinutes: s.breakMinutes,
                 workType: _mapWorkType(s.workType),
-                overrideHourlyWage: s.overrideHourlyWage, // ✅ 날짜별 시급 반영
+                overrideHourlyWage: s.overrideHourlyWage,
+                wageMultiplier: s.wageMultiplier,
               ),
             )
             .toList(growable: false);

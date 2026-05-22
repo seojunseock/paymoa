@@ -17,6 +17,7 @@ class StoreSchedule {
 
   final String workType;
   final int? overrideHourlyWage; // ✅ 날짜별 시급 override
+  final double wageMultiplier;   // ✅ 보너스 배율 (기본 1.0)
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -34,6 +35,7 @@ class StoreSchedule {
     required this.breakMinutes,
     required this.workType,
     this.overrideHourlyWage,
+    this.wageMultiplier = 1.0,
     this.createdAt,
     this.updatedAt,
   });
@@ -61,7 +63,8 @@ class StoreSchedule {
       endMinute: (data['endMinute'] as num?)?.toInt() ?? 0,
       breakMinutes: (data['breakMinutes'] as num?)?.toInt() ?? 0,
       workType: (data['workType'] ?? 'basic') as String,
-      overrideHourlyWage: (data['overrideHourlyWage'] as num?)?.toInt(), // ✅
+      overrideHourlyWage: (data['overrideHourlyWage'] as num?)?.toInt(),
+      wageMultiplier: (data['wageMultiplier'] as num?)?.toDouble() ?? 1.0,
       createdAt: _toDate(data['createdAt']),
       updatedAt: _toDate(data['updatedAt']),
     );

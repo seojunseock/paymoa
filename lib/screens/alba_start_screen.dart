@@ -28,6 +28,12 @@ class _DotEvent {
   const _DotEvent(this.color, this.albaName);
 }
 
+String _fmtMultiplier(double v) {
+  if (v == v.truncateToDouble()) return '${v.toInt()}.0';
+  final s = v.toStringAsFixed(2);
+  return s.endsWith('0') ? s.substring(0, s.length - 1) : s;
+}
+
 String _wonNum(int v) {
   final s = v.toString();
   final b = StringBuffer();
@@ -296,10 +302,12 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
 
     final totalHoursText = _hoursText(b.totalWorkedMinutes);
     final typeLabel = _typeLabelByTime(b.children);
-    final firstSchedule = b.children.isNotEmpty ? b.children.first : null;
-    final effectiveWage = firstSchedule?.overrideHourlyWage ??
-        widget.wageAt?.call(widget.alba.id, widget.localDate) ??
-        widget.alba.hourlyWage;
+    final effectiveWage = b.children.map((s) {
+      final base = s.overrideHourlyWage ??
+          widget.wageAt?.call(widget.alba.id, widget.localDate) ??
+          widget.alba.hourlyWage;
+      return (base * s.wageMultiplier).round();
+    }).reduce((a, b) => a > b ? a : b);
 
     final lines = [...b.children]..sort((a, b) {
         final amn = a.startHour * 60 + a.startMinute;
@@ -368,7 +376,7 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                     ),
                   ),
                 ),
-              ],
+            ],
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -379,7 +387,7 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 2),
                       child: Text(
-                        '${_timeRangeText(s.startHour, s.startMinute, s.endHour, s.endMinute)}  ·  ${_workTypeLabel(s.workType)}',
+                        '${_timeRangeText(s.startHour, s.startMinute, s.endHour, s.endMinute)}  ·  ${_workTypeLabel(s.workType)}${s.wageMultiplier != 1.0 ? '  ·  보너스${_fmtMultiplier(s.wageMultiplier)}' : ''}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurface.withOpacity(0.70),
                           fontWeight: FontWeight.w600,
@@ -420,7 +428,7 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 0),
                       dense: true,
                       title: Text(
-                        '$st~$et (${_workTypeLabel(s.workType)})',
+                        '$st~$et (${_workTypeLabel(s.workType)})${s.wageMultiplier != 1.0 ? '  ·  보너스${_fmtMultiplier(s.wageMultiplier)}' : ''}',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -2103,6 +2111,33 @@ class _EmptyView extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SurchargeBadge extends StatelessWidget {
+  const _SurchargeBadge({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(left: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.22), width: 1),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
         ),
       ),
     );
