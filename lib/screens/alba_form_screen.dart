@@ -567,6 +567,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         initialDate: todayDate,
         firstDay: DateTime(2020),
         lastDay: todayDate.add(const Duration(days: 365)),
+        title: '몇 일부터 적용하시겠습니까?',
       );
       if (!mounted) return;
       if (picked == null) return;

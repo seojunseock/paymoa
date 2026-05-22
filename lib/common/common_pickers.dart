@@ -923,6 +923,7 @@ Future<DateTime?> showSingleDatePickerDialog(
   DateTime? initialDate,
   DateTime? firstDay,
   DateTime? lastDay,
+  String? title,
 }) {
   return showDialog<DateTime>(
     context: context,
@@ -931,6 +932,7 @@ Future<DateTime?> showSingleDatePickerDialog(
       initial: initialDate ?? DateTime.now(),
       firstDay: firstDay ?? DateTime.utc(2010, 1, 1),
       lastDay: lastDay ?? DateTime.utc(2035, 12, 31),
+      title: title,
     ),
   );
 }
@@ -940,10 +942,12 @@ class _SingleDateDialog extends StatefulWidget {
     required this.initial,
     required this.firstDay,
     required this.lastDay,
+    this.title,
   });
   final DateTime initial;
   final DateTime firstDay;
   final DateTime lastDay;
+  final String? title;
 
   @override
   State<_SingleDateDialog> createState() => _SingleDateDialogState();
@@ -980,6 +984,20 @@ class _SingleDateDialogState extends State<_SingleDateDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.title != null) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                  child: Text(
+                    widget.title!,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Divider(height: 1, color: theme.dividerColor.withOpacity(0.4)),
+                const SizedBox(height: 4),
+              ],
               TableCalendar(
                 locale: 'ko_KR',
                 firstDay: widget.firstDay,
