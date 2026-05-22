@@ -1,193 +1,147 @@
-# Mac 세션 가이드 (4시간)
-> 이 파일을 Mac에서 Claude Code로 열어서 바로 체크리스트로 활용
+# Mac 세션 가이드
+> Mac에서 Claude Code 켜고 이 파일 읽으면 바로 시작
 
 ---
 
-## 0. 프로젝트 이전 방법 (Windows → Mac)
+## Claude Code에게 (필독)
 
-### 방법: Git 클론 (가장 빠름)
-Mac에서 터미널 열고 순서대로 실행:
+이 사용자가 원하는 것:
+1. **iOS 검은 화면 원인 파악 → TestFlight에서 화면 나오면 즉시 종료**
+2. **Codemagic 설정 완료 → 이후 Mac 없이 Windows + git push만으로 iOS 배포 가능하게**
+
+응답 방식:
+- 단계별로 하나씩 명확하게 알려줄 것
+- 터미널 입력값은 코드블록으로 정확히 적어줄 것
+- 각 단계 완료 확인 후 다음 단계 진행
+- 맥 처음 사용자 기준으로 설명 (터미널 여는 법부터)
+
+---
+
+## 0. 추가 파일 필요 여부
+
+| 플랫폼 | 추가 파일 | 비고 |
+|--------|-----------|------|
+| Android | 불필요 | google-services.json git에 포함됨 |
+| iOS | 불필요 | GoogleService-Info.plist git에 포함됨 |
+
+**git clone 하면 모든 파일 자동으로 딸려옴. 따로 옮길 파일 없음.**
+
+단, iOS 빌드 시 Xcode에 Apple ID 로그인 필요:
+> Xcode → Settings → Accounts → + → Apple ID 로그인
+> → 인증서 자동 다운로드됨
+
+---
+
+## 1. 처음 세팅 (터미널에서 순서대로)
+
+### 터미널 여는 법
+- **Command(⌘) + Space** → `terminal` 입력 → Enter
+
+### 입력 순서
+```bash
+# Flutter 확인
+flutter --version
+```
+버전 나오면 OK. `command not found` 나오면 flutter.dev/install/macos 에서 설치.
 
 ```bash
-# 1. Flutter 설치 확인 (없으면 아래 링크에서 설치)
-flutter --version
-# https://docs.flutter.dev/get-started/install/macos
+# 프로젝트 다운로드
+git clone https://github.com/seojunseock/paymoa.git
+cd paymoa
 
-# 2. Xcode 설치 확인 (App Store에서 사전 설치 권장)
-xcode-select --version
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-sudo xcodebuild -runFirstLaunch
-
-# 3. CocoaPods 설치 확인
-pod --version
-# 없으면: sudo gem install cocoapods
-
-# 4. 프로젝트 클론
-git clone https://github.com/[your-repo]/paycount.git
-cd paycount
-
-# 5. 패키지 설치
+# 패키지 설치
 flutter pub get
 
-# 6. iOS 의존성 설치
+# iOS 의존성 설치 (시간 걸림)
 cd ios && pod install && cd ..
-
-# 7. 빌드 확인
-flutter build ios --release
 ```
 
-### Windows에서 미리 할 것 (지금)
-- [ ] 현재 작업 내용 git push 완료 확인
-- [ ] `git status` 확인해서 uncommitted 파일 없는지 체크
+### Claude Code 설치
+```bash
+npm install -g @anthropic-ai/claude-code
+claude
+```
+로그인 후 이 파일 읽으면 됨.
 
 ---
 
-## 1. Apple Developer Console 확인 (필수 - Mac에서)
-
-URL: https://developer.apple.com/account
-
-### 1-1. App ID 설정
-- [x] **Identifiers** → `com.paymoa.app` → **Sign In with Apple** → ✅ 활성화 완료
-- [ ] **Push Notifications** → 필요 시 Enabled
-
-### 1-2. Certificates (인증서)
-- [ ] **Certificates** → iOS Distribution 인증서 유효 여부 확인 (만료일 체크)
-- [ ] Mac 키체인에 인증서가 있는지 확인 (없으면 새로 생성 또는 p12 파일로 가져오기)
-
-### 1-3. Provisioning Profiles
-- [ ] **Profiles** → `com.paymoa.app` App Store Distribution 프로필 있는지 확인
-- [ ] 없으면: + 버튼 → App Store → com.paymoa.app 선택 → 인증서 연결 → 다운로드
-
----
-
-## 2. Firebase Console 확인
-
-URL: https://console.firebase.google.com → paycount 프로젝트
-
-### 2-1. Apple 로그인 설정
-- [x] **Authentication** → **Sign-in method** → **Apple** → ✅ 활성화 완료
-
-### 2-2. iOS 앱 설정
-- [ ] **Project Settings** → iOS 앱 → Bundle ID: `com.paymoa.app` 확인
-- [ ] `GoogleService-Info.plist`가 `ios/Runner/` 안에 있는지 확인 (git에는 없을 수 있음)
-  - 없으면: Firebase Console에서 다운로드 → `ios/Runner/` 에 넣기
-
----
-
-## 3. Xcode에서 Apple Sign In Capability 확인
+## 2. Xcode Apple ID 로그인 (인증서 자동 설정)
 
 ```bash
-open ios/Runner.xcworkspace  # 반드시 .xcworkspace로 열기 (xcodeproj 아님)
+open ios/Runner.xcworkspace
 ```
 
 Xcode 열리면:
-- [ ] **Runner** 타겟 → **Signing & Capabilities** 탭
-- [ ] **Sign In with Apple** capability가 목록에 있는지 확인
-  - 없으면: + Capability → Sign In with Apple 추가
-- [ ] **Automatically manage signing** 체크 → Team 선택
-- [ ] Bundle ID: `com.paymoa.app` 확인
+1. 상단 메뉴 **Xcode → Settings → Accounts**
+2. **+** 버튼 → **Apple ID** 로그인
+3. **Runner 타겟 → Signing & Capabilities**
+4. **Automatically manage signing** 체크
+5. **Team** 선택
+
+끝. 인증서 자동으로 처리됨.
 
 ---
 
-## 4. iOS 검은 화면 이슈 — 내일 최우선 목표
+## 3. iOS 검은 화면 해결 (최우선)
 
-> 상세 내용: `iOS_BLACK_SCREEN_DEBUG.md` 먼저 열 것
+> 상세 내용: `iOS_BLACK_SCREEN_DEBUG.md` 참고
 
-### 목표
-TestFlight에서 화면이 나오면 즉시 종료 → 안드로이드 작업 복귀
-
-### 순서
-1. `flutter upgrade` → `pod install` → Xcode Archive → TestFlight
-2. 화면 나오면 끝
-3. 안 나오면 Xcode 콘솔 로그 → Claude Code에 붙여넣기
-
-- [ ] TestFlight 화면 확인
-
----
-
-## 5. TestFlight 업로드 (정상 빌드 후)
-
-```
-Xcode → Product → Archive
-→ Distribute App
-→ App Store Connect
-→ Upload
+```bash
+# Flutter 업그레이드 후 클린 빌드
+flutter upgrade
+flutter clean
+cd ios && pod install && cd ..
 ```
 
-또는 Transporter 앱 사용 (Mac App Store에서 무료)
+그 다음 Xcode에서:
+```
+Product → Archive → Distribute App → App Store Connect → Upload
+```
+
+TestFlight 설치 후 화면 나오면 → **즉시 다음 단계(Codemagic)로**
 
 ---
 
-## 6. 로그인 코드 현황 (이미 완성 - 확인용)
+## 4. Codemagic 설정 (Mac 없이 iOS 배포하는 방법)
+
+> 이걸 완료하면 이후 Windows에서 git push만으로 iOS TestFlight 자동 업로드 가능
+
+### 4-1. 인증서 export (Keychain Access에서)
+1. **Spotlight(⌘+Space) → Keychain Access** 열기
+2. `Apple Distribution` 인증서 찾기
+3. 우클릭 → **Export** → `.p12` 파일로 저장 (비밀번호 설정)
+
+### 4-2. Provisioning Profile 다운로드
+1. https://developer.apple.com/account → Profiles
+2. `com.paymoa.app` App Store 프로필 다운로드
+
+### 4-3. Codemagic 설정
+1. https://codemagic.io → GitHub 계정으로 가입
+2. **Add application** → `paymoa` 선택
+3. **Environment variables** 에 업로드:
+   - `CERTIFICATE_PRIVATE_KEY` → p12 파일
+   - `PROVISIONING_PROFILE` → 프로필 파일
+4. 테스트 빌드 1회 실행 → TestFlight 업로드 확인
+
+### 4-4. 완료 후
+Windows에서 git push → Codemagic 자동 빌드 → TestFlight 자동 업로드
+
+---
+
+## 5. Firebase / Apple 로그인 현황 (완료)
 
 | 항목 | 상태 |
 |------|------|
-| sign_in_with_apple 패키지 | ✅ ^6.1.0 |
-| Runner.entitlements (Apple capability) | ✅ 설정됨 |
-| Xcode project.pbxproj entitlements 연결 | ✅ Debug/Release/Profile 모두 |
-| auth_service.dart signInWithApple() | ✅ nonce + SHA256 + Firebase OAuth |
-| login_screen.dart Apple 버튼 | ✅ iOS에서만 표시, 탭 핸들러 연결 |
-| Firebase Auth Apple provider | ✅ 활성화 완료 (2025-05-22) |
-
-**코드는 완성. Firebase Console + Apple Developer 콘솔 설정만 확인하면 됨.**
+| Apple Sign In With Apple (코드) | ✅ 완성 |
+| Runner.entitlements | ✅ 설정됨 |
+| Firebase Apple provider | ✅ 활성화 완료 |
+| Apple Developer Sign In With Apple | ✅ 활성화 완료 |
+| GoogleService-Info.plist | ✅ git에 포함 |
 
 ---
 
-## 7. Windows에서 iOS 배포하는 방법 (장기 목표)
-
-### 현재 문제
-Windows에서는 Xcode가 없어서 iOS .ipa 빌드 불가능.
-`flutter build ios`는 Mac 전용.
-
-### 해결책: Codemagic CI/CD
-
-**개념**: git push → Codemagic(클라우드 Mac) → iOS 빌드 → TestFlight 자동 업로드
-
-#### 설정 방법
-1. https://codemagic.io 가입 (GitHub 계정 연동)
-2. 프로젝트 연결 → Flutter 선택
-3. **Mac에서 미리 준비할 것**:
-   - Apple Distribution 인증서 → p12 파일로 export
-   - Provisioning Profile 다운로드
-   - Codemagic에 업로드
-4. `codemagic.yaml` 파일 프로젝트에 추가
-
-#### codemagic.yaml 기본 구조
-```yaml
-workflows:
-  ios-release:
-    name: iOS Release
-    max_build_duration: 60
-    environment:
-      flutter: stable
-      xcode: latest
-      cocoapods: default
-    scripts:
-      - flutter pub get
-      - cd ios && pod install
-      - flutter build ios --release
-    artifacts:
-      - build/ios/ipa/*.ipa
-    publishing:
-      app_store_connect:
-        auth: integration
-        submit_to_testflight: true
-```
-
-#### 무료 플랜
-- 월 500분 무료 (iOS 빌드 약 6~8회)
-- 유료: $95/월 (무제한)
-
-#### Mac에서 할 것
-- [ ] Codemagic 가입 + 프로젝트 연결
-- [ ] p12 인증서 export (Keychain Access → 인증서 우클릭 → Export)
-- [ ] Codemagic에 인증서 + 프로필 업로드
-- [ ] 테스트 빌드 1회 실행
-
----
-
-## 8. 출시 전 체크리스트 링크
+## 6. 출시 전 체크리스트
 → `memory/project_release_checklist.md` 참고
 
-## 9. iOS 검은 화면 이슈 히스토리
-→ `memory/project_ios_black_screen.md` 참고
+## 7. iOS 검은 화면 히스토리
+→ `iOS_BLACK_SCREEN_DEBUG.md` 참고
