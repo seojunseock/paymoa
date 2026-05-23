@@ -391,7 +391,8 @@ class _ExpandableMergedCardState extends State<_ExpandableMergedCard> {
                           Text(
                             '${_timeRangeText(s.startHour, s.startMinute, s.endHour, s.endMinute)}  ·  ${_workTypeLabel(s.workType)}',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface.withOpacity(0.70),
+                              color:
+                                  theme.colorScheme.onSurface.withOpacity(0.70),
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -2161,3 +2162,33 @@ class _SurchargeBadge extends StatelessWidget {
     );
   }
 }
+
+
+//1. 터미널 열기
+//  키보드에서 ⌘(Command) + Space 동시에 누르기
+//  → 검색창에 terminal 입력
+//  → Enter
+
+//2. git clone
+
+// git clone https://github.com/seojunseock/paymoa.git
+//  → 완료되면:
+//  cd paymoa
+
+//  3. 패키지 설치
+
+//  flutter pub get
+//  → 완료되면:
+//  cd ios && pod install && cd ..
+//  시간 걸림. 완료까지 기다리기.
+
+//  4. Claude Code 설치
+
+//  npm install -g @anthropic-ai/claude-code
+
+//  5. Claude Code 실행
+
+// claude
+//  → 로그인 화면 뜨면 Anthropic 계정으로 로그인
+//  → 켜지면 입력:
+//"MAC_SESSION_GUIDE.md 읽고 브리핑해줘"  

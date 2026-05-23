@@ -1387,9 +1387,7 @@ class FirebaseService {
         q = q.where('dateKey', isGreaterThanOrEqualTo: fromKey);
       }
       final personalSnap = await q.get();
-      final personalDocs = personalSnap.docs
-          .where((d) => d.data()['overrideHourlyWage'] == null)
-          .toList();
+      final personalDocs = personalSnap.docs.toList();
 
       final joinDocs = schedules
           .where((s) =>
@@ -1415,9 +1413,7 @@ class FirebaseService {
           jq = jq.where('dateKey', isGreaterThanOrEqualTo: fromKey);
         }
         final snap = await jq.get();
-        allJoinDocs.addAll(
-          snap.docs.where((d) => d.data()['overrideHourlyWage'] == null),
-        );
+        allJoinDocs.addAll(snap.docs);
       }
 
       final allDocs = [...personalDocs, ...allJoinDocs];

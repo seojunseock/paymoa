@@ -401,14 +401,20 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
   }
 
   bool _policyChanged(pol.SurchargePolicy? after) {
+    return _policyChangedSnap(after, _weeklyHoliday, _weeklyOvertime);
+  }
+
+  bool _policyChangedSnap(
+    pol.SurchargePolicy? after,
+    bool snapWeeklyHoliday,
+    bool snapWeeklyOvertime,
+  ) {
     final before = _initialSurcharge;
     final beforeWeeklyHoliday = _initialWeeklyHoliday ?? false;
     final beforeWeeklyOvertime = _initialWeeklyOvertime ?? false;
-    final afterWeeklyHoliday = _weeklyHoliday;
-    final afterWeeklyOvertime = _weeklyOvertime;
 
-    if (beforeWeeklyHoliday != afterWeeklyHoliday) return true;
-    if (beforeWeeklyOvertime != afterWeeklyOvertime) return true;
+    if (beforeWeeklyHoliday != snapWeeklyHoliday) return true;
+    if (beforeWeeklyOvertime != snapWeeklyOvertime) return true;
     if ((before?.overtimeEnabled ?? false) !=
         (after?.overtimeEnabled ?? false)) {
       return true;
@@ -442,10 +448,10 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     return b.toString();
   }
 
-  bool _taxInsChanged() {
-    if (_initialTax != null && _tax != _initialTax) return true;
+  bool _taxInsChangedSnap(pol.TaxConfig snapTax, pol.InsuranceConfig snapIns) {
+    if (_initialTax != null && snapTax != _initialTax) return true;
     if (_initialIns != null &&
-        _ins.runtimeType != _initialIns!.runtimeType) return true;
+        snapIns.runtimeType != _initialIns!.runtimeType) return true;
     return false;
   }
 
@@ -459,17 +465,38 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     if (_saving) return;
     _dismissKeyboard();
 
-    final name = _name.text.trim();
-    if (name.isEmpty) {
+    // ── 저장 시작 시점의 상태를 즉시 스냅샷 ──────────────────────────────
+    // async 작업(다이얼로그 등) 중 스위치/필드가 바뀌어도 이 값으로 저장됨
+    final snapName = _name.text.trim();
+    final snapWorkerName = _workerNameCtrl.text.trim();
+    final snapStoreId = _storeId;
+    final snapInheritFromStore = _inheritFromStore;
+    final snapWageText = _wage.text;
+    final snapWeeklyHoliday = _weeklyHoliday;
+    final snapWeeklyOvertime = _weeklyOvertime;
+    final snapSurcharge = _surcharge;
+    final snapTax = _tax;
+    final snapIns = _ins;
+    final snapPayrollPolicy = _payrollPolicy;
+    final snapColorHex = _colorHex;
+    final snapStartH = _startH;
+    final snapStartM = _startM;
+    final snapEndH = _endH;
+    final snapEndM = _endM;
+    final snapBreakMin = _breakMin;
+    final snapSelected = Set<DateTime>.from(_selected);
+    // ──────────────────────────────────────────────────────────────────────
+
+    // ── 동기 유효성 검사 ──────────────────────────────────────────────────
+    if (snapName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('매장 이름을 적어주세요.')),
       );
       return;
     }
 
-    final isNewJoin = !_isEdit && _storeId.isNotEmpty;
-    final workerNameInput = _workerNameCtrl.text.trim();
-    if (isNewJoin && workerNameInput.isEmpty) {
+    final isNewJoin = !_isEdit && snapStoreId.isNotEmpty;
+    if (isNewJoin && snapWorkerName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('본인 이름을 적어주세요.')),
       );
@@ -484,13 +511,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       return;
     }
 
-    if (_inheritFromStore && _storeDefaults != null) {
-      _applyStoreDefaultsToFields(_storeDefaults!);
-      _payrollPolicy = _storeDefaults!.payrollPolicy;
-      _payrollConfirmed = true;
-    }
-
-    final newWage = _parseMoney(_wage.text);
+    final newWage = _parseMoney(snapWageText);
     if (newWage <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('시급을 입력해 주세요.')),
@@ -498,8 +519,8 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       return;
     }
 
-    // 직접 등록(개인 알바)은 날짜 필수, 매장 조인은 선택
-    if (_selected.isEmpty && _storeId.isEmpty) {
+    // 직접 등록(개인 알바)은 날짜 필수, 매장 조인 또는 수정 모드는 선택
+    if (snapSelected.isEmpty && snapStoreId.isEmpty && widget.editingAlbaId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('근무 날짜를 선택해 주세요.')),
       );
@@ -507,7 +528,7 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     }
 
     final conflicts = <DateTime>[];
-    for (final utc in _selected) {
+    for (final utc in snapSelected) {
       final local = DateTime(utc.year, utc.month, utc.day);
       if (_hasConflictOn(local)) conflicts.add(local);
     }
@@ -531,11 +552,13 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       if (!mounted) return;
       return;
     }
+    // ──────────────────────────────────────────────────────────────────────
 
-    var finalSurcharge = (_surcharge ?? const pol.SurchargePolicy()).copyWith(
-      weeklyHolidayEnabled: _weeklyHoliday,
+    // ── 가산 정책 계산 (스냅샷 기반) ─────────────────────────────────────
+    var finalSurcharge = (snapSurcharge ?? const pol.SurchargePolicy()).copyWith(
+      weeklyHolidayEnabled: snapWeeklyHoliday,
     );
-    if (_weeklyOvertime) {
+    if (snapWeeklyOvertime) {
       finalSurcharge = finalSurcharge.copyWith(
         overtimeEnabled: true,
         overtimeRule: pol.OvertimeRule.weeklyOver40,
@@ -543,6 +566,9 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
             ? finalSurcharge.overtimePercent
             : 50,
       );
+    } else if (finalSurcharge.overtimeRule == pol.OvertimeRule.weeklyOver40) {
+      // 주 40h 연장 스위치가 꺼졌으면 overtimeEnabled도 반드시 끔
+      finalSurcharge = finalSurcharge.copyWith(overtimeEnabled: false);
     }
 
     final anyOn = finalSurcharge.weeklyHolidayEnabled ||
@@ -550,106 +576,112 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
         finalSurcharge.holidayEnabled ||
         finalSurcharge.nightEnabled;
     final effectiveSurcharge = anyOn ? finalSurcharge : null;
+    // ──────────────────────────────────────────────────────────────────────
 
+    // ── 변경 감지 (스냅샷 기반) ───────────────────────────────────────────
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
     DateTime effectiveFrom = todayDate;
 
     final bool wageChanged =
         _isEdit && _initialWage != null && newWage != _initialWage;
-    final bool surchargeChanged = _isEdit && _policyChanged(effectiveSurcharge);
-    final bool taxInsChanged = _isEdit && _taxInsChanged();
+    final bool surchargeChanged =
+        _isEdit && _policyChangedSnap(effectiveSurcharge, snapWeeklyHoliday, snapWeeklyOvertime);
+    final bool taxInsChanged =
+        _isEdit && _taxInsChangedSnap(snapTax, snapIns);
+    // ──────────────────────────────────────────────────────────────────────
 
-    if (wageChanged || surchargeChanged || taxInsChanged) {
-      // 1. 적용 시작일 선택
-      final picked = await cp.showSingleDatePickerDialog(
-        context,
-        initialDate: todayDate,
-        firstDay: DateTime(2020),
-        lastDay: todayDate.add(const Duration(days: 365)),
-        title: '몇 일부터 적용하시겠습니까?',
-      );
-      if (!mounted) return;
-      if (picked == null) return;
-      effectiveFrom = DateTime(picked.year, picked.month, picked.day);
-
-      // 2. 확인 다이얼로그
-      final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
-      final lines = <String>[];
-      if (wageChanged || surchargeChanged) {
-        lines.add('시급·가산정책은 $dateLabel부터 적용됩니다.');
-      }
-      if (taxInsChanged) {
-        lines.add('세금·보험은 $dateLabel부터 적용됩니다.');
-      }
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text(
-            '적용 시작일 안내',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-          ),
-          content: Text(
-            lines.join('\n'),
-            style: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text(
-                '취소',
-                style: TextStyle(color: Color(0xFF6B7280)),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text(
-                '확인',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF111827),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      if (confirmed != true) return;
-    }
-
-    final DateTime? wageEffectiveFrom = wageChanged ? effectiveFrom : null;
-    final DateTime? policyEffectiveFrom = taxInsChanged ? effectiveFrom : null;
-    final DateTime? surchargeEffectiveFrom = surchargeChanged ? effectiveFrom : null;
-
-    final isNewJoinFinal = !_isEdit && _storeId.isNotEmpty;
-    final result = AlbaFormResult(
-      storeId: _storeId,
-      inheritFromStore: _inheritFromStore,
-      workerName: isNewJoinFinal ? _workerNameCtrl.text.trim() : null,
-      storeName: name,
-      hourlyWage: newWage,
-      colorHex: _colorHex,
-      tax: _tax,
-      ins: _ins,
-      surcharge: effectiveSurcharge,
-      payrollPolicy: _payrollPolicy,
-      startHour24: _startH,
-      startMinute: _startM,
-      endHour24: _endH,
-      endMinute: _endM,
-      breakMinutes: _breakMin,
-      selectedDates: _selected,
-      payDay: _deriveLegacyPayDay(_payrollPolicy),
-      wageEffectiveFrom: wageEffectiveFrom,
-      wageOnlyToday: false,
-      policyEffectiveFrom: policyEffectiveFrom,
-      surchargeEffectiveFrom: surchargeEffectiveFrom,
-    );
+    // ── 변경 있으면 적용일 선택 + 확인 다이얼로그 ─────────────────────────
+    // 이 시점부터 _saving = true → 다이얼로그 중 중복 저장 방지
     setState(() => _saving = true);
     try {
+      if (wageChanged || surchargeChanged || taxInsChanged) {
+        final picked = await cp.showSingleDatePickerDialog(
+          context,
+          initialDate: todayDate,
+          firstDay: DateTime(2020),
+          lastDay: todayDate.add(const Duration(days: 365)),
+          title: '몇 일부터 적용하시겠습니까?',
+        );
+        if (!mounted) return;
+        if (picked == null) return;
+        effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+
+        final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
+        final lines = <String>[];
+        if (wageChanged || surchargeChanged) {
+          lines.add('시급·가산정책은 $dateLabel부터 적용됩니다.');
+        }
+        if (taxInsChanged) {
+          lines.add('세금·보험은 $dateLabel부터 적용됩니다.');
+        }
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text(
+              '적용 시작일 안내',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
+            content: Text(
+              lines.join('\n'),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  '취소',
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  '확인',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        if (confirmed != true) return;
+      }
+
+      // ── 최종 결과 빌드 (모두 스냅샷 기반) ─────────────────────────────
+      final DateTime? wageEffectiveFrom = wageChanged ? effectiveFrom : null;
+      final DateTime? policyEffectiveFrom = taxInsChanged ? effectiveFrom : null;
+      final DateTime? surchargeEffectiveFrom = surchargeChanged ? effectiveFrom : null;
+
+      final isNewJoinFinal = !_isEdit && snapStoreId.isNotEmpty;
+      final result = AlbaFormResult(
+        storeId: snapStoreId,
+        inheritFromStore: snapInheritFromStore,
+        workerName: isNewJoinFinal ? snapWorkerName : null,
+        storeName: snapName,
+        hourlyWage: newWage,
+        colorHex: snapColorHex,
+        tax: snapTax,
+        ins: snapIns,
+        surcharge: effectiveSurcharge,
+        payrollPolicy: snapPayrollPolicy,
+        startHour24: snapStartH,
+        startMinute: snapStartM,
+        endHour24: snapEndH,
+        endMinute: snapEndM,
+        breakMinutes: snapBreakMin,
+        selectedDates: snapSelected,
+        payDay: _deriveLegacyPayDay(snapPayrollPolicy),
+        wageEffectiveFrom: wageEffectiveFrom,
+        wageOnlyToday: false,
+        policyEffectiveFrom: policyEffectiveFrom,
+        surchargeEffectiveFrom: surchargeEffectiveFrom,
+      );
       await widget.onSubmit(result);
     } finally {
       if (mounted) setState(() => _saving = false);
