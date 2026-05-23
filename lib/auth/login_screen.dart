@@ -380,18 +380,73 @@ class _AppleLoginButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: loading ? 0.7 : 1,
-      child: SizedBox(
+    if (loading) {
+      return Container(
+        width: double.infinity,
         height: 56,
-        child: SignInWithAppleButton(
-          onPressed: () {
-            if (loading) return;
-            onTap();
-          },
-          style: SignInWithAppleButtonStyle.black,
-          text: 'Apple로 로그인',
-          borderRadius: const BorderRadius.all(Radius.circular(12)),
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation(Colors.white),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              color: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: Center(
+                      child: Text(
+                        '',
+                        style: TextStyle(
+                          fontSize: 19,
+                          color: Colors.white,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  const Expanded(
+                    child: Text(
+                      'Apple로 로그인',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
