@@ -423,7 +423,7 @@ class _AppleLoginButton extends StatelessWidget {
                       child: Text(
                         '',
                         style: TextStyle(
-                          fontSize: 19,
+                          fontSize: 23,
                           color: Colors.white,
                           height: 1.0,
                         ),
