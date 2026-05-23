@@ -51,9 +51,6 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<!-- Flutter: Impeller 비활성화 (진단용) -->
-	<key>FLTEnableImpeller</key>
-	<false/>
 
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
@@ -98,5 +95,26 @@
 		<string>kakaotalk</string>
 		<string>kakaotalk-5.9.7</string>
 	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneDelegateClassName</key>
+					<string>Runner.SceneDelegate</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>
