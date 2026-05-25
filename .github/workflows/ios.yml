@@ -73,6 +73,9 @@ jobs:
 
       - name: Xcode archive
         run: |
+          BUILD_NUMBER=$(grep "^version:" pubspec.yaml | sed 's/.*+//')
+          BUILD_NAME=$(grep "^version:" pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          echo "Building version $BUILD_NAME build $BUILD_NUMBER"
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
@@ -81,6 +84,10 @@ jobs:
             -archivePath $RUNNER_TEMP/Runner.xcarchive \
             DEVELOPMENT_TEAM=G9ZKTNDZ3P \
             CODE_SIGN_STYLE=Manual \
+            FLUTTER_BUILD_NUMBER=$BUILD_NUMBER \
+            FLUTTER_BUILD_NAME=$BUILD_NAME \
+            CURRENT_PROJECT_VERSION=$BUILD_NUMBER \
+            MARKETING_VERSION=$BUILD_NAME \
             archive
 
       - name: Export IPA
