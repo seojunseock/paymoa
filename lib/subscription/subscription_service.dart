@@ -8,9 +8,11 @@ import '../screens/subscription_screen.dart';
 import '../services/promo_service.dart';
 
 // ─────────────────────────────────────────
-// RevenueCat API 키 (등록 후 교체)
+// RevenueCat API 키
 // ─────────────────────────────────────────
 const _rcAndroidKey = 'goog_ALUYwdkPcoDpZBDsoamZJcCKwpQ';
+// ✅ TODO: RevenueCat 대시보드 → iOS 앱 → API Key 복사 후 아래에 입력
+// 키 입력 후 subscription_screen.dart의 kSubscriptionVisible = true 로 변경
 const _rcIosKey     = 'REVENUECAT_IOS_KEY_HERE';
 
 /// RevenueCat Entitlement ID (RevenueCat 대시보드에서 설정한 이름과 동일해야 함)

@@ -10,15 +10,15 @@ class AdService {
 
   // ── 광고 단위 ID ──
   static String get _interstitialId => Platform.isIOS
-      ? 'ca-app-pub-2756061286403249/3089438621' // TODO: iOS 전면광고 ID로 교체
+      ? 'ca-app-pub-2756061286403249/6032030226'
       : 'ca-app-pub-2756061286403249/3089438621';
 
   static String get _rewardId => Platform.isIOS
-      ? 'ca-app-pub-2756061286403249/7052734360' // TODO: iOS 리워드 ID로 교체
+      ? 'ca-app-pub-2756061286403249/5902517808'
       : 'ca-app-pub-2756061286403249/7052734360';
 
   static String get _bannerId => Platform.isIOS
-      ? 'ca-app-pub-2756061286403249/6645540255' // TODO: iOS 배너 ID로 교체
+      ? 'ca-app-pub-2756061286403249/8658193563'
       : 'ca-app-pub-2756061286403249/6645540255';
 
   InterstitialAd? _interstitialAd;

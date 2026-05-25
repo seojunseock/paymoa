@@ -1,10 +1,13 @@
 // lib/main.dart
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
+import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'firebase_options.dart';
 import 'role/role_gate.dart';
 import 'screens/terms_screen.dart';
@@ -43,6 +46,21 @@ Future<void> main() async {
   } catch (_) {}
 
   runApp(const _App());
+
+  // iOS 14+ ATT 권한 요청
+  // runApp 이후 첫 프레임이 렌더링된 뒤 요청해야 iPadOS/iOS 최신 버전에서 팝업이 정상 표시됨
+  if (Platform.isIOS) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await Future.delayed(const Duration(milliseconds: 200));
+        final status =
+            await AppTrackingTransparency.trackingAuthorizationStatus;
+        if (status == TrackingStatus.notDetermined) {
+          await AppTrackingTransparency.requestTrackingAuthorization();
+        }
+      } catch (_) {}
+    });
+  }
 }
 
 class _App extends StatelessWidget {

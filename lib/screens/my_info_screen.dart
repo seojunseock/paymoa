@@ -1,4 +1,5 @@
 // lib/screens/my_info_screen.dart
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -239,8 +240,8 @@ class _MyInfoScreenState extends State<MyInfoScreen> {
         children: [
           _buildIncomeCard(),
           const SizedBox(height: 16),
-          _buildPromoCard(),
-          const SizedBox(height: 12),
+          if (!Platform.isIOS) _buildPromoCard(),
+          if (!Platform.isIOS) const SizedBox(height: 12),
           _buildPolicyCard(),
           const SizedBox(height: 12),
           _buildFaqSupportCard(),

@@ -1,4 +1,5 @@
 // lib/screens/subscription_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../subscription/subscription_service.dart';
 import '../services/promo_service.dart';
@@ -10,7 +11,8 @@ import '../services/promo_service.dart';
 const kSubscriptionEnabled = true;
 
 /// false 시 구독 UI 전체 숨김
-const kSubscriptionVisible = true;
+/// ✅ TODO: RevenueCat iOS 키 설정 완료 후 true 로 변경
+const kSubscriptionVisible = false;
 
 // ─────────────────────────────────────────
 // 플랜 정의
@@ -345,6 +347,7 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
           const SizedBox(height: 12),
 
           // ── 복원 / 프로모 코드 버튼 ──
+          // iOS: Apple 정책상 커스텀 프로모 코드 불허 → 프로모션 코드 버튼 숨김
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -355,14 +358,16 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
                         fontSize: 13, color: Color(0xFF6B7280),
                         decoration: TextDecoration.underline)),
               ),
-              const Text('·', style: TextStyle(color: Color(0xFF6B7280))),
-              TextButton(
-                onPressed: _loading ? null : _onPromoCode,
-                child: const Text('프로모션 코드',
-                    style: TextStyle(
-                        fontSize: 13, color: Color(0xFF6B7280),
-                        decoration: TextDecoration.underline)),
-              ),
+              if (!Platform.isIOS) ...[
+                const Text('·', style: TextStyle(color: Color(0xFF6B7280))),
+                TextButton(
+                  onPressed: _loading ? null : _onPromoCode,
+                  child: const Text('프로모션 코드',
+                      style: TextStyle(
+                          fontSize: 13, color: Color(0xFF6B7280),
+                          decoration: TextDecoration.underline)),
+                ),
+              ],
             ],
           ),
         ],
