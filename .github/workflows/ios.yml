@@ -69,13 +69,20 @@ jobs:
           xcode-project use-profiles
 
       - name: Flutter build iOS release
-        run: flutter build ios --release --no-codesign
+        run: |
+          BUILD_NUMBER=$(grep "^version:" pubspec.yaml | sed 's/.*+//')
+          BUILD_NAME=$(grep "^version:" pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          echo "Building version $BUILD_NAME build $BUILD_NUMBER"
+          # Generated.xcconfig 업데이트
+          sed -i '' "s/FLUTTER_BUILD_NUMBER=.*/FLUTTER_BUILD_NUMBER=$BUILD_NUMBER/" ios/Flutter/Generated.xcconfig
+          sed -i '' "s/FLUTTER_BUILD_NAME=.*/FLUTTER_BUILD_NAME=$BUILD_NAME/" ios/Flutter/Generated.xcconfig
+          flutter build ios --release --no-codesign
 
       - name: Xcode archive
         run: |
           BUILD_NUMBER=$(grep "^version:" pubspec.yaml | sed 's/.*+//')
           BUILD_NAME=$(grep "^version:" pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
-          echo "Building version $BUILD_NAME build $BUILD_NUMBER"
+          echo "Archiving version $BUILD_NAME build $BUILD_NUMBER"
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
