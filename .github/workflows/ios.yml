@@ -100,6 +100,20 @@ jobs:
             MARKETING_VERSION=$BUILD_NAME \
             archive
 
+      - name: Patch archive build number
+        run: |
+          BUILD_NUMBER=$(grep "^version:" pubspec.yaml | sed 's/.*+//')
+          BUILD_NAME=$(grep "^version:" pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          PLIST="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app/Info.plist"
+          echo "Before patch:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUILD_NAME" "$PLIST"
+          echo "After patch:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST"
+
       - name: Export IPA
         run: |
           # archive에 이미 embed된 프로파일에서 이름 읽기
