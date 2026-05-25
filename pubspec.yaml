@@ -2,7 +2,7 @@ name: paycount
 description: 페이모아 - 알바 급여 계산기
 publish_to: "none"
 
-version: 1.0.7+83
+version: 1.0.7+84
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -66,9 +66,10 @@ dependencies:
   purchases_flutter: ^8.0.0
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # 광고 (AdMob)
+  # 광고 (AdMob + iOS ATT)
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   google_mobile_ads: ^5.0.0
+  app_tracking_transparency: ^2.0.4
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # 인앱 업데이트 (Android: Google Play In-App Update)
@@ -89,6 +90,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 flutter:
+  disable-swift-package-manager: true
   uses-material-design: true
 
   assets:
