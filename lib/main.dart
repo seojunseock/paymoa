@@ -48,19 +48,25 @@ Future<void> main() async {
   runApp(const _App());
 
   // iOS 14+ ATT 권한 요청
-  // runApp 이후 첫 프레임이 렌더링된 뒤 요청해야 iPadOS/iOS 최신 버전에서 팝업이 정상 표시됨
+  // TestFlight 시작 화면 등으로 앱이 inactive 상태일 때 요청하면 팝업이 무시됨
+  // AppLifecycleState.resumed 확인 후 요청해야 정상 표시됨
   if (Platform.isIOS) {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        await Future.delayed(const Duration(milliseconds: 200));
-        final status =
-            await AppTrackingTransparency.trackingAuthorizationStatus;
-        if (status == TrackingStatus.notDetermined) {
-          await AppTrackingTransparency.requestTrackingAuthorization();
-        }
-      } catch (_) {}
-    });
+    _requestATTWhenResumed();
   }
+}
+
+Future<void> _requestATTWhenResumed() async {
+  // 앱이 완전히 foreground(resumed) 상태가 될 때까지 대기
+  while (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+    await Future.delayed(const Duration(milliseconds: 400));
+  }
+  await Future.delayed(const Duration(milliseconds: 500));
+  try {
+    final status = await AppTrackingTransparency.trackingAuthorizationStatus;
+    if (status == TrackingStatus.notDetermined) {
+      await AppTrackingTransparency.requestTrackingAuthorization();
+    }
+  } catch (_) {}
 }
 
 class _App extends StatelessWidget {
