@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../common/app_words.dart';
+import '../common/korean_holidays.dart';
 import '../common/common_pickers.dart' as cp;
 import '../models/ui_calendar_models.dart';
 import '../policies/policies.dart';
@@ -122,6 +123,7 @@ class _TightDayBubble extends StatelessWidget {
     required this.isOutside,
     required this.isSun,
     required this.isSat,
+    this.isHoliday = false,
   });
 
   final String text;
@@ -130,6 +132,7 @@ class _TightDayBubble extends StatelessWidget {
   final bool isOutside;
   final bool isSun;
   final bool isSat;
+  final bool isHoliday;
 
   static const _primary = Color(0xFF7C3AED);
   static const _todayColor = Color(0xFF10B981);
@@ -142,7 +145,7 @@ class _TightDayBubble extends StatelessWidget {
     final bg = isSelected ? _primary.withOpacity(0.85) : Colors.transparent;
 
     Color base = _textPrimary;
-    if (isSun) base = _sunColor;
+    if (isSun || isHoliday) base = _sunColor;
     if (isSat) base = _satColor;
     if (isToday && !isSelected) base = _todayColor;
 
@@ -587,7 +590,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       final color = cp.parseColor(alba.colorHex);
 
       final weeklyMinutes = <DateTime, int>{};
-      final weeklyWorkDays = <DateTime, Set<String>>{};
+      final weeklySchedules = <DateTime, List<UICalendarSchedule>>{};
 
       final rangeStart = monthStart.subtract(const Duration(days: 7));
       final rangeEnd = monthEnd.add(const Duration(days: 7));
@@ -602,8 +605,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         final weekStart = d.subtract(Duration(days: d.weekday % 7)); // 일요일 시작
         final worked = _workedMinutes(s);
         weeklyMinutes[weekStart] = (weeklyMinutes[weekStart] ?? 0) + worked;
-        (weeklyWorkDays[weekStart] ??= <String>{}).add(
-            '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}');
+        (weeklySchedules[weekStart] ??= <UICalendarSchedule>[]).add(s);
       }
 
       for (final entry in weeklyMinutes.entries) {
@@ -624,8 +626,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ? weekSur.weeklyHolidayFixedMinutes
             : (entry.value * 8 / 40).round().clamp(0, 8 * 60);
 
-        final wage = widget.wageAt?.call(aid, holidayDate) ?? alba.hourlyWage;
-        final juhuPay = (wage * (paidMinutes / 60.0)).round();
+        // ✅ 가중 평균 시급 계산 (payroll_engine과 동일한 방식)
+        final ws = weeklySchedules[weekStart] ?? const <UICalendarSchedule>[];
+        int totalWageMin = 0, totalMin = 0;
+        for (final sch in ws) {
+          final schDate = DateTime(sch.year, sch.month, sch.day);
+          final schWage = sch.overrideHourlyWage ??
+              widget.wageAt?.call(aid, schDate) ??
+              alba.hourlyWage;
+          final wMin = _workedMinutes(sch);
+          totalWageMin += schWage * wMin;
+          totalMin += wMin;
+        }
+        final refWage = totalMin > 0
+            ? (totalWageMin / totalMin).round()
+            : (widget.wageAt?.call(aid, weekStart) ?? alba.hourlyWage);
+        final juhuPay = (refWage * (paidMinutes / 60.0)).round();
 
         (map[holidayDate] ??= <_JuhuMark>[]).add(
           _JuhuMark(
@@ -1050,6 +1066,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final idx = day.weekday % 7;
     final isSun = idx == 0;
     final isSat = idx == 6;
+    final isHoliday = !isSun && KoreanHolidays.isHoliday(day);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1066,6 +1083,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             isOutside: isOutside,
             isSun: isSun,
             isSat: isSat,
+            isHoliday: isHoliday,
           ),
         ),
         const SizedBox(height: 1),
@@ -1111,17 +1129,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
               (payroll.monthlyStartDay ?? 1) == 1);
 
       if (isCalendarMonth) {
-        final monthSchedules = widget.schedules
+        final allAlbaSchedules =
+            widget.schedules.where((s) => s.albaId == aid).toList();
+        final monthSchedules = allAlbaSchedules
             .where((s) =>
-                s.albaId == aid &&
-                s.year == _focusedDay.year &&
-                s.month == _focusedDay.month)
+                s.year == _focusedDay.year && s.month == _focusedDay.month)
             .toList();
         final summary = computeMonthlySummary(
           alba: alba,
           ymYear: _focusedDay.year,
           ymMonth: _focusedDay.month,
           schedules: monthSchedules,
+          allSchedules: allAlbaSchedules,
           tax: widget.getTaxAt?.call(aid)?.call(monthStart) ?? tax,
           insurance: widget.getInsuranceAt?.call(aid)?.call(monthStart) ?? ins,
           policy: polc,

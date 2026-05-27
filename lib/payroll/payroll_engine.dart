@@ -12,12 +12,14 @@ class PeriodSummary {
   final DateTime payDate;
   final int gross;
   final int net;
+  final int weeklyHolidayPay;
 
   const PeriodSummary({
     required this.period,
     required this.payDate,
     required this.gross,
     required this.net,
+    this.weeklyHolidayPay = 0,
   });
 }
 
@@ -72,7 +74,7 @@ class PayrollEngine {
     final effectiveTax = taxAt?.call(periodStart) ?? tax;
     final effectiveInsurance = insuranceAt?.call(periodStart) ?? insurance;
 
-    final gross = _computeGrossForPeriod(
+    final (:gross, :weeklyHolidayPay) = _computeGrossForPeriod(
       alba: alba,
       schedules: schedules,
       period: preview.period,
@@ -81,10 +83,31 @@ class PayrollEngine {
       surchargeAt: surchargeAt,
     );
 
+    // ✅ day66: 기간 내 스케줄만 필터링해서 날짜별 세금 계산
+    final periodEnd = preview.period.end;
+    final periodSchedules = effectiveTax == TaxConfig.day66
+        ? schedules.where((s) {
+            final d = DateTime(s.year, s.month, s.day);
+            return !d.isBefore(_dateOnly(periodStart)) &&
+                !d.isAfter(_dateOnly(periodEnd));
+          }).toList()
+        : null;
+
+    final day66Tax = periodSchedules != null
+        ? computeDay66Tax(
+            alba: alba,
+            schedules: periodSchedules,
+            policy: surchargePolicy,
+            wageAt: wageAt,
+            surchargeAt: surchargeAt,
+          )
+        : null;
+
     final net = _applyTaxInsurance(
       gross: gross,
       tax: effectiveTax,
       insurance: effectiveInsurance,
+      precomputedTax: day66Tax,
     );
 
     return PeriodSummary(
@@ -92,12 +115,13 @@ class PayrollEngine {
       payDate: preview.payDate,
       gross: gross,
       net: net,
+      weeklyHolidayPay: weeklyHolidayPay,
     );
   }
 
   /* ───────── 내부 계산 ───────── */
 
-  int _computeGrossForPeriod({
+  ({int gross, int weeklyHolidayPay}) _computeGrossForPeriod({
     required UICalendarAlba alba,
     required List<UICalendarSchedule> schedules,
     required PayPeriod period,
@@ -121,11 +145,9 @@ class PayrollEngine {
     }).toList();
 
     int gross = 0;
+    int weeklyHolidayPay = 0;
     final Map<DateTime, int> weeklyWorkedMinutes = {};
-    final Map<DateTime, int> weeklyHolidayEligibleMinutes = {};
-    final Map<DateTime, Set<String>> weeklyHolidayWorkDays = {};
     final Map<DateTime, List<UICalendarSchedule>> weeklyScheduleMap = {};
-    final Map<DateTime, List<UICalendarSchedule>> weeklyHolidayScheduleMap = {};
 
     for (final s in targetSchedules) {
       gross += computeSinglePay(
@@ -133,7 +155,7 @@ class PayrollEngine {
         s: s,
         policy: surchargePolicy,
         wageAt: wageAt,
-        surchargeAt: surchargeAt, // ✅ 날짜별 정책 이력 전달
+        surchargeAt: surchargeAt,
       );
 
       final (schStart, schEnd) = _scheduleRange(s);
@@ -147,53 +169,67 @@ class PayrollEngine {
         wageAt: wageAt,
         surchargeAt: surchargeAt,
       );
-      final sundayKey = _sundayOf(DateTime(s.year, s.month, s.day));
 
-      // ✅ 주40 연장 계산용: 전체 근무시간 유지 (segment 기준)
+      // ✅ 주40 연장 계산용
       weeklyWorkedMinutes[segmentStart] =
           (weeklyWorkedMinutes[segmentStart] ?? 0) + workedMin;
       (weeklyScheduleMap[segmentStart] ??= <UICalendarSchedule>[]).add(s);
-
-      // ✅ 주휴 계산용: basic 근무만, 주 전체(일요일 key) 기준
-      if (s.workType == WorkType.basic) {
-        weeklyHolidayEligibleMinutes[sundayKey] =
-            (weeklyHolidayEligibleMinutes[sundayKey] ?? 0) + workedMin;
-        (weeklyHolidayScheduleMap[sundayKey] ??= <UICalendarSchedule>[])
-            .add(s);
-        (weeklyHolidayWorkDays[sundayKey] ??= <String>{})
-            .add(_ymdOf(schStart));
-      }
     }
 
-    // ✅ 주휴수당 - 주 전체(일~토) 기준, 법적 계산: Σ(근무시간×시급) / 총근무시간
-    weeklyHolidayEligibleMinutes.forEach((sundayKey, mins) {
-      if (mins < 15 * 60) return;
-      final saturday = sundayKey.add(const Duration(days: 6));
-      final weekPolicy = surchargeAt?.call(saturday) ?? surchargePolicy;
-      if (!weekPolicy.weeklyHolidayEnabled) return;
+    // ✅ 주휴수당: 기간 내 토요일 기준, 주 전체 스케줄 사용 (급여 기간 경계 버그 수정)
+    // schedules(전체)에서 조회하므로 기간 밖 근무도 15시간 체크에 반영됨
+    final periodEndDate = _dateOnly(period.end);
+    final daysToFirstSat =
+        (DateTime.saturday - periodStart.weekday + 7) % 7;
+    var satCursor = periodStart.add(Duration(days: daysToFirstSat));
 
-      final ws = weeklyHolidayScheduleMap[sundayKey] ??
-          const <UICalendarSchedule>[];
-      int totalWageMin = 0, totalMin = 0;
-      for (final sch in ws) {
-        final schDate = DateTime(sch.year, sch.month, sch.day);
-        final wage = sch.overrideHourlyWage ??
-            wageAt?.call(alba.id, schDate) ?? alba.hourlyWage;
+    while (!satCursor.isAfter(periodEndDate)) {
+      final saturday = satCursor;
+      final sundayKey = saturday.subtract(const Duration(days: 6));
+
+      final fullWeekSchedules = schedules.where((s) {
+        if (s.albaId != alba.id) return false;
+        if (s.workType != WorkType.basic) return false;
+        final d = DateTime(s.year, s.month, s.day);
+        return !d.isBefore(sundayKey) && !d.isAfter(saturday);
+      }).toList();
+
+      int fullWeekMins = 0;
+      for (final sch in fullWeekSchedules) {
         final (st, en) = _scheduleRange(sch);
-        final wMin = _workedMinutes(st, en, sch.breakMinutes);
-        totalWageMin += wage * wMin;
-        totalMin += wMin;
+        fullWeekMins += _workedMinutes(st, en, sch.breakMinutes);
       }
-      final refWage = totalMin > 0
-          ? (totalWageMin / totalMin).round()
-          : (wageAt?.call(alba.id, sundayKey) ?? alba.hourlyWage);
 
-      final paidMinutes = weekPolicy.weeklyHolidayUseFixedMinutes
-          ? weekPolicy.weeklyHolidayFixedMinutes
-          : min(8 * 60, (mins * 8 / 40).round());
+      if (fullWeekMins >= 15 * 60) {
+        final weekPolicy = surchargeAt?.call(saturday) ?? surchargePolicy;
+        if (weekPolicy.weeklyHolidayEnabled) {
+          int totalWageMin = 0, totalMin = 0;
+          for (final sch in fullWeekSchedules) {
+            final schDate = DateTime(sch.year, sch.month, sch.day);
+            final wage = sch.overrideHourlyWage ??
+                wageAt?.call(alba.id, schDate) ??
+                alba.hourlyWage;
+            final (st, en) = _scheduleRange(sch);
+            final wMin = _workedMinutes(st, en, sch.breakMinutes);
+            totalWageMin += wage * wMin;
+            totalMin += wMin;
+          }
+          final refWage = totalMin > 0
+              ? (totalWageMin / totalMin).round()
+              : (wageAt?.call(alba.id, sundayKey) ?? alba.hourlyWage);
 
-      gross += (refWage * (paidMinutes / 60)).round();
-    });
+          final paidMinutes = weekPolicy.weeklyHolidayUseFixedMinutes
+              ? weekPolicy.weeklyHolidayFixedMinutes
+              : min(8 * 60, (fullWeekMins * 8 / 40).round());
+
+          final weekPay = (refWage * (paidMinutes / 60)).round();
+          gross += weekPay;
+          weeklyHolidayPay += weekPay;
+        }
+      }
+
+      satCursor = satCursor.add(const Duration(days: 7));
+    }
 
     // ✅ 주 40시간 초과 연장수당 - segment 기준, 가중 평균 시급
     weeklyWorkedMinutes.forEach((segmentStart, totalMins) {
@@ -227,18 +263,24 @@ class PayrollEngine {
               .round();
     });
 
-    return gross;
+    return (gross: gross, weeklyHolidayPay: weeklyHolidayPay);
   }
 
   int _applyTaxInsurance({
     required int gross,
     required TaxConfig tax,
     required InsuranceConfig insurance,
+    int? precomputedTax, // ✅ day66 전용: 사전 계산된 세액
   }) {
-    double taxPct = 0;
-    if (tax == TaxConfig.biz33) taxPct = 3.3;
-    if (tax == TaxConfig.day66) taxPct = 6.6;
-    if (tax is TaxConfigCustomPercent) taxPct = tax.percent;
+    int taxAmount;
+    if (precomputedTax != null) {
+      taxAmount = precomputedTax;
+    } else {
+      double taxPct = 0;
+      if (tax == TaxConfig.biz33) taxPct = 3.3;
+      if (tax is TaxConfigCustomPercent) taxPct = tax.percent;
+      taxAmount = (gross * taxPct / 100.0).round();
+    }
 
     // 2026년 근로자 부담분
     // 고용보험: 0.9%
@@ -247,7 +289,7 @@ class PayrollEngine {
     if (insurance is InsuranceEmploymentOnly) insPct = 0.9;
     if (insurance is InsuranceFour) insPct = 9.4;
 
-    return (gross * (1 - (taxPct + insPct) / 100)).round();
+    return gross - taxAmount - (gross * insPct / 100.0).round();
   }
 
   /* ───────── util ───────── */

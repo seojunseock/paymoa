@@ -15,6 +15,7 @@ MonthlySummary computeMonthlySummary({
   int? ymMonth,
   DateTime? ymDate,
   required List<UICalendarSchedule> schedules,
+  List<UICalendarSchedule>? allSchedules, // ✅ 월 경계 주휴 계산용 (없으면 schedules 사용)
   required TaxConfig tax,
   required InsuranceConfig insurance,
   required SurchargePolicy policy, // 기본 정책 (이력 없을 때 폴백)
@@ -32,14 +33,11 @@ MonthlySummary computeMonthlySummary({
   final monthSchedules =
       schedules.where((s) => s.year == year && s.month == month).toList();
 
-  // 주별 집계(주휴/주40) - ✅ 정책 변경일이 낀 주는 해당 날짜부터 다시 끊어서 집계
+  // 주별 집계(주40) - ✅ 정책 변경일이 낀 주는 해당 날짜부터 다시 끊어서 집계
   final Map<DateTime, int> weeklyWorkedMinutes = {};
-  final Map<DateTime, int> weeklyHolidayEligibleMinutes = {};
-  final Map<DateTime, Set<String>> weeklyHolidayWorkDays = {};
 
   int gross = 0;
   final Map<DateTime, List<UICalendarSchedule>> weeklyScheduleMap = {};
-  final Map<DateTime, List<UICalendarSchedule>> weeklyHolidayScheduleMap = {};
 
   for (final s in monthSchedules) {
     final pay = computeSinglePay(
@@ -47,7 +45,7 @@ MonthlySummary computeMonthlySummary({
       s: s,
       policy: policy,
       wageAt: wageAt,
-      surchargeAt: surchargeAt, // ✅ 날짜별 정책
+      surchargeAt: surchargeAt,
     );
     gross += pay;
 
@@ -66,24 +64,11 @@ MonthlySummary computeMonthlySummary({
       wageAt: wageAt,
       surchargeAt: surchargeAt,
     );
-    // 주휴는 주 전체(일~토) 기준 — 시급/정책 변경으로 segment가 쪼개여도
-    // 법적으로 1주 소정근로시간은 주 전체를 합산해야 함
-    final sundayKey = _sundayOf(DateTime(s.year, s.month, s.day));
 
-    // ✅ 주40 초과 연장 계산용: 전체 근무시간 유지 (segment 기준)
+    // ✅ 주40 초과 연장 계산용
     weeklyWorkedMinutes[segmentStart] =
         (weeklyWorkedMinutes[segmentStart] ?? 0) + workedMin;
     (weeklyScheduleMap[segmentStart] ??= []).add(s);
-
-    // ✅ 주휴 계산용: basic 근무만, 주 전체(일요일 key) 기준
-    if (s.workType == WorkType.basic) {
-      weeklyHolidayEligibleMinutes[sundayKey] =
-          (weeklyHolidayEligibleMinutes[sundayKey] ?? 0) + workedMin;
-      (weeklyHolidayScheduleMap[sundayKey] ??= []).add(s);
-
-      final dayKey = _ymdOf(DateTime(s.year, s.month, s.day));
-      (weeklyHolidayWorkDays[sundayKey] ??= <String>{}).add(dayKey);
-    }
   }
 
   // ✅ 주 40시간 초과 연장수당 - segment 기준, 가중 평균 시급
@@ -116,24 +101,52 @@ MonthlySummary computeMonthlySummary({
         .round();
   });
 
-  // ✅ 주휴수당 - 주 전체(일~토) 기준, 법적 계산식: Σ(근무시간×시급) / 총근무시간
-  weeklyHolidayEligibleMinutes.forEach((sundayKey, mins) {
-    if (mins < 15 * 60) return;
-    // 그 주 마지막 날(토요일) 정책 적용
-    final saturday = sundayKey.add(const Duration(days: 6));
-    final weekPolicy = surchargeAt?.call(saturday) ?? policy;
-    if (!weekPolicy.weeklyHolidayEnabled) return;
+  // ✅ 주휴수당: 이 월에 토요일이 속한 주 기준, 주 전체 스케줄 사용 (월 경계 버그 수정)
+  // allSchedules가 있으면 사용 (달력 앱 화면처럼 전체 스케줄을 가진 경우)
+  // 없으면 schedules 폴백 (문서 생성처럼 월 스케줄만 있는 경우)
+  final fullSchedules = allSchedules ?? schedules;
+  for (var d = DateTime(year, month, 1);
+      d.month == month;
+      d = d.add(const Duration(days: 1))) {
+    if (d.weekday != DateTime.saturday) continue;
+    final saturday = d;
+    final sundayKey = saturday.subtract(const Duration(days: 6));
 
-    final ws = weeklyHolidayScheduleMap[sundayKey] ?? [];
+    final fullWeekSchedules = fullSchedules.where((s) {
+      if (s.albaId != alba.id) return false;
+      if (s.workType != WorkType.basic) return false;
+      final dd = DateTime(s.year, s.month, s.day);
+      return !dd.isBefore(sundayKey) && !dd.isAfter(saturday);
+    }).toList();
+
+    int fullWeekMins = 0;
+    for (final sch in fullWeekSchedules) {
+      final st =
+          DateTime(sch.year, sch.month, sch.day, sch.startHour, sch.startMinute);
+      var en =
+          DateTime(sch.year, sch.month, sch.day, sch.endHour, sch.endMinute);
+      if (!en.isAfter(st)) en = en.add(const Duration(days: 1));
+      fullWeekMins +=
+          max(0, en.difference(st).inMinutes - sch.breakMinutes.clamp(0, 1440));
+    }
+
+    if (fullWeekMins < 15 * 60) continue;
+
+    final weekPolicy = surchargeAt?.call(saturday) ?? policy;
+    if (!weekPolicy.weeklyHolidayEnabled) continue;
+
     int totalWageMin = 0, totalMin = 0;
-    for (final sch in ws) {
+    for (final sch in fullWeekSchedules) {
       final schDate = DateTime(sch.year, sch.month, sch.day);
       final wage = sch.overrideHourlyWage ??
           wageAt?.call(alba.id, schDate) ?? alba.hourlyWage;
-      final st = DateTime(sch.year, sch.month, sch.day, sch.startHour, sch.startMinute);
-      var en = DateTime(sch.year, sch.month, sch.day, sch.endHour, sch.endMinute);
+      final st =
+          DateTime(sch.year, sch.month, sch.day, sch.startHour, sch.startMinute);
+      var en =
+          DateTime(sch.year, sch.month, sch.day, sch.endHour, sch.endMinute);
       if (!en.isAfter(st)) en = en.add(const Duration(days: 1));
-      final wMin = max(0, en.difference(st).inMinutes - sch.breakMinutes.clamp(0, 1440));
+      final wMin =
+          max(0, en.difference(st).inMinutes - sch.breakMinutes.clamp(0, 1440));
       totalWageMin += wage * wMin;
       totalMin += wMin;
     }
@@ -141,25 +154,34 @@ MonthlySummary computeMonthlySummary({
         ? (totalWageMin / totalMin).round()
         : (wageAt?.call(alba.id, sundayKey) ?? alba.hourlyWage);
 
-    final paidMinutes = _weeklyHolidayPaidMinutes(
-      policy: weekPolicy,
-      weekStart: sundayKey,
-      weeklyWorkedMinutes: mins,
-      weeklyWorkDays: weeklyHolidayWorkDays[sundayKey] ?? const <String>{},
-    );
+    final paidMinutes = weekPolicy.weeklyHolidayUseFixedMinutes
+        ? max(0, weekPolicy.weeklyHolidayFixedMinutes)
+        : min(8 * 60, (fullWeekMins * 8 / 40).round());
 
     gross += (refWage * (paidMinutes / 60.0)).round();
-  });
+  }
 
   // ✅ 월 요약 세후는 해당 월 기준일 정책 사용
   final monthBaseDate = DateTime(year, month, 1);
   final effectiveTax = taxAt?.call(monthBaseDate) ?? tax;
   final effectiveInsurance = insuranceAt?.call(monthBaseDate) ?? insurance;
 
+  // ✅ day66: 날짜별 일급 기준으로 150,000 비과세 공제 후 2.97% 세액 계산
+  final day66Tax = effectiveTax == TaxConfig.day66
+      ? computeDay66Tax(
+          alba: alba,
+          schedules: monthSchedules,
+          policy: policy,
+          wageAt: wageAt,
+          surchargeAt: surchargeAt,
+        )
+      : null;
+
   final net = _applyTaxInsurance(
     gross: gross,
     tax: effectiveTax,
     insurance: effectiveInsurance,
+    precomputedTax: day66Tax,
   );
   return MonthlySummary(gross: gross, net: net);
 }
@@ -196,7 +218,13 @@ int computeSinglePay({
   int overtimePay = 0, nightPay = 0, holidayPay = 0;
 
   // ✅ 연장근로(옵션)
-  if (effectivePolicy.overtimeEnabled) {
+  // 한국법 2단계 휴일 계산(holidayUseKoreanLawTier)이 적용되는 날은
+  // 8시간 초과분에 이미 +100% 가산이 포함 → 연장수당 별도 계산 시 이중계산
+  final isKoreanLawHolidayDay = effectivePolicy.holidayEnabled &&
+      effectivePolicy.holidayUseKoreanLawTier &&
+      _isHolidayDay(DateTime(s.year, s.month, s.day), effectivePolicy);
+
+  if (effectivePolicy.overtimeEnabled && !isKoreanLawHolidayDay) {
     final overtimeMin = _overtimeMinutes(
       policy: effectivePolicy,
       workedMin: workedMin,
@@ -233,15 +261,54 @@ int computeSinglePay({
    Tax / Insurance
 ───────────────────────────── */
 
+/// ✅ 일용직(day66) 세금 정확 계산
+/// 법적 계산: 날짜별 일급에서 150,000원 비과세 공제 후 2.97%
+/// = (일급 - 150,000) × 6% × (1 - 45% 세액공제) = (일급 - 150,000) × 2.97%
+int computeDay66Tax({
+  required UICalendarAlba alba,
+  required List<UICalendarSchedule> schedules,
+  required SurchargePolicy policy,
+  int Function(String albaId, DateTime dateLocal)? wageAt,
+  SurchargePolicy Function(DateTime date)? surchargeAt,
+}) {
+  // 날짜별 일급 합산
+  final Map<String, int> dailyGross = {};
+  for (final s in schedules) {
+    final key = _ymdOf(DateTime(s.year, s.month, s.day));
+    final pay = computeSinglePay(
+      alba: alba,
+      s: s,
+      policy: policy,
+      wageAt: wageAt,
+      surchargeAt: surchargeAt,
+    );
+    dailyGross[key] = (dailyGross[key] ?? 0) + pay;
+  }
+
+  // 일별 세액 합산
+  int totalTax = 0;
+  for (final dg in dailyGross.values) {
+    final taxable = max(0, dg - 150000);
+    totalTax += (taxable * 0.0297).round();
+  }
+  return totalTax;
+}
+
 int _applyTaxInsurance({
   required int gross,
   required TaxConfig tax,
   required InsuranceConfig insurance,
+  int? precomputedTax, // ✅ day66 전용: 사전 계산된 세액 전달
 }) {
-  double taxPct = 0.0;
-  if (tax == TaxConfig.biz33) taxPct = 3.3;
-  if (tax == TaxConfig.day66) taxPct = 6.6;
-  if (tax is TaxConfigCustomPercent) taxPct = tax.percent;
+  int taxAmount;
+  if (precomputedTax != null) {
+    taxAmount = precomputedTax;
+  } else {
+    double taxPct = 0.0;
+    if (tax == TaxConfig.biz33) taxPct = 3.3;
+    if (tax is TaxConfigCustomPercent) taxPct = tax.percent;
+    taxAmount = (gross * taxPct / 100.0).round();
+  }
 
   // 2026년 근로자 부담분
   // 고용보험: 0.9%
@@ -250,7 +317,7 @@ int _applyTaxInsurance({
   if (insurance is InsuranceEmploymentOnly) insPct = 0.9;
   if (insurance is InsuranceFour) insPct = 9.4;
 
-  return (gross * (1 - (taxPct + insPct) / 100.0)).round();
+  return gross - taxAmount - (gross * insPct / 100.0).round();
 }
 
 /* ─────────────────────────────

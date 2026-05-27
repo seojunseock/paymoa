@@ -121,7 +121,8 @@ class PayrollExcelService {
   ) {
     final deduct = r.gross - r.net;
     final basePay = (r.hourlyWage * r.workedMinutes / 60.0).round();
-    final surchargePay = r.gross - basePay;
+    final hasWeeklyHoliday = r.weeklyHolidayPay > 0;
+    final surchargePay = r.gross - basePay - r.weeklyHolidayPay;
 
     final taxText = _taxLabel(r.tax) ?? '-';
     final insText = _insLabel(r.insurance) ?? '-';
@@ -166,12 +167,23 @@ class PayrollExcelService {
     _cardLabelValue(
         sheet, top + 6, left, '시급', '${_fmt.format(r.hourlyWage)}원');
 
-    // 지급 항목
+    // 지급 항목 (주휴수당 유무에 따라 행 오프셋 달라짐)
     _cardSectionHead(sheet, top + 7, left, '지급 항목');
     _cardLabelValue(sheet, top + 8, left, '기본급', '${_fmt.format(basePay)}원');
+
+    int payOffset = 0;
+    if (hasWeeklyHoliday) {
+      _cardLabelValue(
+        sheet, top + 9, left, '주휴수당',
+        '+${_fmt.format(r.weeklyHolidayPay)}원',
+        valueColor: 'FF0D6E3A',
+      );
+      payOffset = 1;
+    }
+
     _cardLabelValue(
       sheet,
-      top + 9,
+      top + 9 + payOffset,
       left,
       '가산수당',
       surchargePay > 0 ? '+${_fmt.format(surchargePay)}원' : '-',
@@ -179,7 +191,7 @@ class PayrollExcelService {
     );
     _cardLabelValue(
       sheet,
-      top + 10,
+      top + 10 + payOffset,
       left,
       '지급 합계',
       '${_fmt.format(r.gross)}원',
@@ -188,12 +200,12 @@ class PayrollExcelService {
     );
 
     // 공제 항목
-    _cardSectionHead(sheet, top + 11, left, '공제 항목');
-    _cardLabelValue(sheet, top + 12, left, '세금', taxText);
-    _cardLabelValue(sheet, top + 13, left, '보험', insText);
+    _cardSectionHead(sheet, top + 11 + payOffset, left, '공제 항목');
+    _cardLabelValue(sheet, top + 12 + payOffset, left, '세금', taxText);
+    _cardLabelValue(sheet, top + 13 + payOffset, left, '보험', insText);
     _cardLabelValue(
       sheet,
-      top + 14,
+      top + 14 + payOffset,
       left,
       '공제 합계',
       deduct > 0 ? '-${_fmt.format(deduct)}원' : '-',
@@ -202,12 +214,12 @@ class PayrollExcelService {
     );
 
     // 실지급액
-    _mg(sheet, top + 15, left + 0, top + 15, left + 4);
-    _c(sheet, top + 15, left + 0, '', bg: _hdrBg, rh: 3);
+    _mg(sheet, top + 15 + payOffset, left + 0, top + 15 + payOffset, left + 4);
+    _c(sheet, top + 15 + payOffset, left + 0, '', bg: _hdrBg, rh: 3);
 
     _c(
       sheet,
-      top + 16,
+      top + 16 + payOffset,
       left + 0,
       '실 지급액',
       bold: true,
@@ -217,10 +229,10 @@ class PayrollExcelService {
       rh: 26,
       border: true,
     );
-    _mg(sheet, top + 16, left + 1, top + 16, left + 4);
+    _mg(sheet, top + 16 + payOffset, left + 1, top + 16 + payOffset, left + 4);
     _c(
       sheet,
-      top + 16,
+      top + 16 + payOffset,
       left + 1,
       '${_fmt.format(r.net)}원',
       bold: true,
@@ -239,10 +251,10 @@ class PayrollExcelService {
           ? 18.0
           : (mergedNotes.length * 14).toDouble();
 
-      _mg(sheet, top + 17, left + 0, top + 17, left + 4);
+      _mg(sheet, top + 17 + payOffset, left + 0, top + 17 + payOffset, left + 4);
       _c(
         sheet,
-        top + 17,
+        top + 17 + payOffset,
         left + 0,
         notesText,
         fs: 7,
@@ -254,10 +266,10 @@ class PayrollExcelService {
       );
 
       // 하단 문구
-      _mg(sheet, top + 18, left + 0, top + 18, left + 4);
+      _mg(sheet, top + 18 + payOffset, left + 0, top + 18 + payOffset, left + 4);
       _c(
         sheet,
-        top + 18,
+        top + 18 + payOffset,
         left + 0,
         '※ 본 명세서는 페이모아 앱에서 자동 생성되었습니다.',
         fs: 7,
@@ -268,10 +280,10 @@ class PayrollExcelService {
       );
     } else {
       // 하단 문구
-      _mg(sheet, top + 17, left + 0, top + 17, left + 4);
+      _mg(sheet, top + 17 + payOffset, left + 0, top + 17 + payOffset, left + 4);
       _c(
         sheet,
-        top + 17,
+        top + 17 + payOffset,
         left + 0,
         '※ 본 명세서는 페이모아 앱에서 자동 생성되었습니다.',
         fs: 7,
@@ -389,7 +401,7 @@ class PayrollExcelService {
   ) {
     final sheet = excel['급여대장'];
 
-    const C = 10;
+    const C = 11;
     const widths = [
       16.0,
       20.0,
@@ -397,6 +409,7 @@ class PayrollExcelService {
       14.0,
       12.0,
       14.0,
+      12.0,
       10.0,
       12.0,
       14.0,
@@ -457,7 +470,7 @@ class PayrollExcelService {
       fc: 'FF555577',
       rh: 22,
     );
-    _mg(sheet, row, 5, row, 9);
+    _mg(sheet, row, 5, row, 10);
     _c(
       sheet,
       row,
@@ -479,7 +492,7 @@ class PayrollExcelService {
       fc: 'FF555577',
       rh: 22,
     );
-    _mg(sheet, row, 5, row, 9);
+    _mg(sheet, row, 5, row, 10);
     _c(
       sheet,
       row,
@@ -503,6 +516,7 @@ class PayrollExcelService {
       '총 근무시간',
       '시급',
       '지급액',
+      '주휴수당',
       '세금',
       '보험',
       '공제액',
@@ -544,13 +558,23 @@ class PayrollExcelService {
           bg: bg, fs: 12, ha: HorizontalAlign.Right, border: true);
       _c(sheet, row, 5, '${_fmt.format(r.gross)}원',
           bg: bg, fs: 12, ha: HorizontalAlign.Right, border: true);
-      _c(sheet, row, 6, _taxShort(r.tax),
+      _c(
+          sheet,
+          row,
+          6,
+          r.weeklyHolidayPay > 0 ? '${_fmt.format(r.weeklyHolidayPay)}원' : '-',
+          bg: bg,
+          fs: 12,
+          ha: HorizontalAlign.Right,
+          fc: r.weeklyHolidayPay > 0 ? 'FF0D6E3A' : 'FF000000',
+          border: true);
+      _c(sheet, row, 7, _taxShort(r.tax),
           bg: bg, fs: 11, ha: HorizontalAlign.Center, border: true);
-      _c(sheet, row, 7, _insShort(r.insurance),
+      _c(sheet, row, 8, _insShort(r.insurance),
           bg: bg, fs: 11, ha: HorizontalAlign.Center, border: true);
-      _c(sheet, row, 8, deduct > 0 ? '${_fmt.format(deduct)}원' : '-',
+      _c(sheet, row, 9, deduct > 0 ? '${_fmt.format(deduct)}원' : '-',
           bg: bg, fs: 12, ha: HorizontalAlign.Right, border: true);
-      _c(sheet, row, 9, '${_fmt.format(r.net)}원',
+      _c(sheet, row, 10, '${_fmt.format(r.net)}원',
           bg: bg, fs: 12, bold: true, ha: HorizontalAlign.Right, border: true);
 
       tDays += r.scheduleCount;
@@ -595,13 +619,14 @@ class PayrollExcelService {
         border: true);
     _c(sheet, row, 6, '', bg: _totBg, border: true);
     _c(sheet, row, 7, '', bg: _totBg, border: true);
-    _c(sheet, row, 8, tDeduct > 0 ? '${_fmt.format(tDeduct)}원' : '-',
+    _c(sheet, row, 8, '', bg: _totBg, border: true);
+    _c(sheet, row, 9, tDeduct > 0 ? '${_fmt.format(tDeduct)}원' : '-',
         bold: true,
         fs: 12,
         bg: _totBg,
         ha: HorizontalAlign.Right,
         border: true);
-    _c(sheet, row, 9, '${_fmt.format(tNet)}원',
+    _c(sheet, row, 10, '${_fmt.format(tNet)}원',
         bold: true,
         fs: 12,
         bg: _totBg,

@@ -212,7 +212,16 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ═══ 세금 ═══
-                  const _SectionTitle(text: '세금'),
+                  const _SectionTitle(
+                    text: '세금',
+                    helpTitle: '세금이란?',
+                    helpBody: '급여를 받을 때 국가에 내는 소득세예요.\n\n'
+                        '• 없음 — 세금 없이 급여 전액을 받아요.\n\n'
+                        '• 3.3% — 프리랜서·강사처럼 용역 계약으로 일할 때 써요. 급여의 3.3%를 세금으로 내요.\n\n'
+                        '• 일용직 (6.6%) — 하루 단위 단기 알바에 써요. 하루 일당에서 15만 원을 먼저 빼고, 남은 금액의 2.97%만 세금으로 내요.\n'
+                        '  예) 일당 20만 원 → 5만 원 × 2.97% ≈ 1,485원\n\n'
+                        '• 직접 입력 — 세율을 직접 정할 수 있어요.',
+                  ),
                   const SizedBox(height: 8),
                   _RadioTile(
                     label: '없음',
@@ -271,7 +280,15 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                   const SizedBox(height: 24),
 
                   // ═══ 보험 ═══
-                  const _SectionTitle(text: '4대보험'),
+                  const _SectionTitle(
+                    text: '4대보험',
+                    helpTitle: '4대보험이란?',
+                    helpBody: '국가에서 운영하는 사회보험이에요. 일부 금액을 급여에서 공제해요.\n\n'
+                        '• 없음 — 보험료를 공제하지 않아요.\n\n'
+                        '• 고용보험만 (0.9%) — 급여의 0.9%를 공제해요. 나중에 직장을 잃으면 실업급여를 받을 수 있어요.\n\n'
+                        '• 4대보험 전체 (~9.4%) — 국민연금 4.5% + 건강보험 3.545% + 고용보험 0.9% + 장기요양 0.45% = 약 9.4%를 공제해요.\n\n'
+                        '※ 2026년 근로자 부담분 기준이에요.',
+                  ),
                   const SizedBox(height: 8),
                   _RadioTile(
                     label: '없음',
@@ -302,7 +319,12 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                   const SizedBox(height: 24),
 
                   // ═══ 추가수당 ═══
-                  const _SectionTitle(text: '추가 수당'),
+                  const _SectionTitle(
+                    text: '추가 수당',
+                    helpTitle: '추가 수당이란?',
+                    helpBody: '기본 시급 외에 법이나 약속으로 추가로 받는 돈이에요.\n\n'
+                        '아래 각 항목의 ? 버튼을 누르면 계산 방법을 자세히 볼 수 있어요.',
+                  ),
                   const SizedBox(height: 8),
 
                   // ── 주휴수당 (showWeeklyToggles=true일 때만)
@@ -313,6 +335,14 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                       on: _weeklyHolidayOn,
                       controller: null,
                       onToggle: (v) => setState(() => _weeklyHolidayOn = v),
+                      helpTitle: '주휴수당이란?',
+                      helpBody: '주 15시간 이상 일하면 쉬는 날에도 하루치 급여를 추가로 받는 제도예요.\n\n'
+                          '계산법\n'
+                          '(주 근무시간 ÷ 40시간) × 8시간 × 시급\n'
+                          '(최대 8시간까지만 인정해요)\n\n'
+                          '예) 주 20시간 근무, 시급 10,000원\n'
+                          '→ (20 ÷ 40) × 8시간 × 10,000원 = 40,000원 추가\n\n'
+                          '※ 주 15시간 미만이면 주휴수당이 없어요.',
                     ),
                     const SizedBox(height: 6),
                   ],
@@ -327,6 +357,12 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                       _dailyOverOn = v;
                       if (v) _weeklyOverOn = false; // 둘 중 하나만
                     }),
+                    helpTitle: '연장수당 (일 8시간 초과)란?',
+                    helpBody: '하루에 8시간을 넘게 일하면 초과한 시간에 추가 수당을 받아요.\n\n'
+                        '계산법\n'
+                        '초과 시간 × 시급 × 설정 비율%\n\n'
+                        '예) 10시간 근무, 시급 10,000원, 50% 설정\n'
+                        '→ 초과 2시간 × 10,000원 × 50% = 10,000원 추가',
                   ),
                   const SizedBox(height: 6),
 
@@ -341,6 +377,12 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                         _weeklyOverOn = v;
                         if (v) _dailyOverOn = false; // 둘 중 하나만
                       }),
+                      helpTitle: '연장수당 (주 40시간 초과)란?',
+                      helpBody: '일요일~토요일 한 주 동안 총 40시간을 넘게 일하면 초과분에 추가 수당을 받아요.\n\n'
+                          '계산법\n'
+                          '(주 총 근무시간 - 40시간) × 시급 × 설정 비율%\n\n'
+                          '예) 주 45시간 근무, 시급 10,000원, 50% 설정\n'
+                          '→ 초과 5시간 × 10,000원 × 50% = 25,000원 추가',
                     ),
                     const SizedBox(height: 6),
                   ],
@@ -352,6 +394,16 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                     on: _holOn,
                     controller: _holPctCtl,
                     onToggle: (v) => setState(() => _holOn = v),
+                    helpTitle: '휴일 근무 수당이란?',
+                    helpBody: '매장에서 정한 쉬는 날에 일하면 기본 시급 외에 추가 수당을 받아요.\n\n'
+                        '어떤 날이 쉬는 날인가요?\n'
+                        '• 기본은 일요일이에요.\n'
+                        '• 토요일은 자동으로 포함되지 않아요.\n'
+                        '• 설날·추석·어린이날 같은 빨간 날은 사장님이 직접 날짜를 추가 등록해야 해요.\n\n'
+                        '계산법\n'
+                        '휴일 근무시간 × 시급 × 설정 비율%\n\n'
+                        '예) 일요일 4시간 근무, 시급 10,000원, 50% 설정\n'
+                        '→ 4시간 × 10,000원 × 50% = 20,000원 추가',
                   ),
                   const SizedBox(height: 6),
 
@@ -362,6 +414,13 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
                     on: _nightOn,
                     controller: _nightPctCtl,
                     onToggle: (v) => setState(() => _nightOn = v),
+                    helpTitle: '야간 수당이란?',
+                    helpBody: '밤 10시(22:00)부터 새벽 6시(06:00) 사이에 일한 시간에 추가 수당을 받아요.\n\n'
+                        '계산법\n'
+                        '야간 시간대 근무시간 × 시급 × 설정 비율%\n\n'
+                        '예) 밤 11시 ~ 새벽 2시 근무 (3시간),\n'
+                        '시급 10,000원, 50% 설정\n'
+                        '→ 3시간 × 10,000원 × 50% = 15,000원 추가',
                   ),
                 ],
               ),
@@ -376,16 +435,31 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
 /* ────────────── 공통 컴포넌트 ────────────── */
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.text});
+  const _SectionTitle({required this.text, this.helpTitle, this.helpBody});
   final String text;
+  final String? helpTitle;
+  final String? helpBody;
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF374151)));
+    return Row(
+      children: [
+        Text(text,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF374151))),
+        if (helpTitle != null) ...[
+          const Spacer(),
+          GestureDetector(
+            onTap: () =>
+                _showHelpDialog(context, title: helpTitle!, body: helpBody!),
+            child: const Icon(Icons.help_outline_rounded,
+                size: 18, color: Color(0xFFB0B8C1)),
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -538,12 +612,16 @@ class _SurchargeTile extends StatelessWidget {
     required this.on,
     required this.controller,
     required this.onToggle,
+    this.helpTitle,
+    this.helpBody,
   });
   final String label;
   final String desc;
   final bool on;
   final TextEditingController? controller;
   final ValueChanged<bool> onToggle;
+  final String? helpTitle;
+  final String? helpBody;
 
   static const _purple = Color(0xFF7C3AED);
 
@@ -581,6 +659,17 @@ class _SurchargeTile extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (helpTitle != null)
+                  GestureDetector(
+                    onTap: () => _showHelpDialog(context,
+                        title: helpTitle!, body: helpBody!),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(Icons.help_outline_rounded,
+                          size: 16,
+                          color: on ? _purple.withOpacity(0.5) : const Color(0xFFB0B8C1)),
+                    ),
+                  ),
                 Switch(
                   value: on,
                   onChanged: onToggle,
@@ -644,14 +733,6 @@ class _TaxInsEffectiveNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final String label;
-    if (now.day == 1) {
-      label = '이번 달(${now.month}월 1일)부터 반영됩니다';
-    } else {
-      final nm = now.month == 12 ? 1 : now.month + 1;
-      label = '다음 달(${nm}월 1일)부터 반영됩니다';
-    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -663,16 +744,60 @@ class _TaxInsEffectiveNote extends StatelessWidget {
           const Icon(Icons.info_outline_rounded,
               size: 14, color: Color(0xFF9CA3AF)),
           const SizedBox(width: 6),
-          Expanded(
+          const Expanded(
             child: Text(
-              '세금·보험 변경은 $label',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              '세금·보험 변경은 이번 달 또는 다음 달부터 반영 가능합니다',
+              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+void _showHelpDialog(BuildContext context,
+    {required String title, required String body}) {
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 16, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF111827))),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx),
+                  child: const Icon(Icons.close_rounded,
+                      size: 20, color: Color(0xFF9CA3AF)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(body,
+                style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF374151),
+                    height: 1.65)),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 String _digitsOnly(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');

@@ -13,6 +13,7 @@ import '../../payroll/payroll.dart';
 import '../../payroll/payroll_policy_mapper.dart' as ppm;
 import '../payroll_policy_sheet.dart';
 import 'owner_store_code_screen.dart';
+import '../../common/help_dialog.dart';
 
 /* ── 디자인 상수 (alba_form_screen 동일) ── */
 const _bg = Color(0xFFF8F7FF);
@@ -77,12 +78,16 @@ class _OwnerSettingRow extends StatelessWidget {
     required this.label,
     required this.value,
     this.onTap,
+    this.helpTitle,
+    this.helpBody,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final VoidCallback? onTap;
+  final String? helpTitle;
+  final String? helpBody;
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +123,10 @@ class _OwnerSettingRow extends StatelessWidget {
                 ),
               ),
             ),
+            if (helpTitle != null) ...[
+              const SizedBox(width: 6),
+              helpIcon(context, title: helpTitle!, body: helpBody!),
+            ],
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right, size: 18, color: Color(0xFFD1D5DB)),
           ],
@@ -334,23 +343,43 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
       final insChanged = _initialIns != null && _ins != _initialIns;
       final surchargeChanged = _initialSurcharge != null &&
           _surcharge != _initialSurcharge;
-      if (wageChanged || taxChanged || insChanged || surchargeChanged) {
+
+      DateTime? wageSurchargeFrom;
+      DateTime? taxInsFrom;
+
+      // 시급·가산정책: 달력으로 날짜 직접 선택
+      if (wageChanged || surchargeChanged) {
         final picked = await cp.showSingleDatePickerDialog(
           context,
           initialDate: todayDate,
           firstDay: DateTime(2020),
           lastDay: todayDate.add(const Duration(days: 365)),
-          title: '몇 일부터 적용하시겠습니까?',
+          title: '시급·가산정책 적용일',
         );
         if (!mounted) return;
         if (picked == null) return;
-        effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+        wageSurchargeFrom = DateTime(picked.year, picked.month, picked.day);
+      }
 
-        final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
+      // 세금·보험: 이번달/다음달 선택
+      if (taxChanged || insChanged) {
+        final picked = await _showMonthChoiceDialog(title: '세금·보험 적용 시작');
+        if (!mounted) return;
+        if (picked == null) return;
+        taxInsFrom = picked;
+      }
+
+      if (wageChanged || surchargeChanged || taxChanged || insChanged) {
         final lines = <String>[];
-        if (wageChanged) lines.add('· 시급은 $dateLabel부터 적용됩니다.');
-        if (taxChanged || insChanged) lines.add('· 세금·보험은 $dateLabel부터 적용됩니다.');
-        if (surchargeChanged) lines.add('· 가산정책은 $dateLabel부터 적용됩니다.');
+        if (wageChanged || surchargeChanged) {
+          final d = wageSurchargeFrom!;
+          if (wageChanged) lines.add('· ${d.month}/${d.day}부터 시급이 적용됩니다.');
+          if (surchargeChanged) lines.add('· ${d.month}/${d.day}부터 가산정책이 적용됩니다.');
+        }
+        if (taxChanged || insChanged) {
+          final d = taxInsFrom!;
+          lines.add('· ${d.month}월 ${d.day}일부터 세금·보험이 적용됩니다.');
+        }
 
         final confirmed = await showDialog<bool>(
           context: context,
@@ -377,6 +406,8 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
         );
         if (!mounted) return;
         if (confirmed != true) return;
+
+        effectiveFrom = wageSurchargeFrom ?? taxInsFrom;
       }
     }
 
@@ -439,6 +470,55 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   // ── helpers
+  Future<DateTime?> _showMonthChoiceDialog({String title = '언제부터 적용할까요?'}) async {
+    final now = DateTime.now();
+    final thisMonth = DateTime(now.year, now.month, 1);
+    final nextMonth = now.month == 12
+        ? DateTime(now.year + 1, 1, 1)
+        : DateTime(now.year, now.month + 1, 1);
+    return showDialog<DateTime>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.pop(ctx, thisMonth),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                child: Row(children: [
+                  const Expanded(child: Text('이번 달부터', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                  Text('${thisMonth.month}월 1일', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
+                ]),
+              ),
+            ),
+            const Divider(height: 1),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.pop(ctx, nextMonth),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                child: Row(children: [
+                  const Expanded(child: Text('다음 달부터', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                  Text('${nextMonth.month}월 1일', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
+                ]),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소', style: TextStyle(color: Color(0xFF6B7280))),
+          ),
+        ],
+      ),
+    );
+  }
+
   Map<String, dynamic> _policyToMap() => {
         'tax': {
           'enabled': _tax != pol.TaxConfig.none,
@@ -774,6 +854,13 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                     label: '세금',
                     value: _taxLabel(_tax),
                     onTap: _openPolicy,
+                    helpTitle: '세금이란?',
+                    helpBody: '급여를 받을 때 국가에 내는 소득세예요.\n\n'
+                        '• 없음 — 세금 없이 급여 전액을 받아요.\n\n'
+                        '• 3.3% — 프리랜서·강사처럼 용역 계약으로 일할 때 써요. 급여의 3.3%를 세금으로 내요.\n\n'
+                        '• 일용직 (6.6%) — 하루 단위 단기 알바에 써요. 하루 일당에서 15만 원을 먼저 빼고, 남은 금액의 2.97%만 세금으로 내요.\n'
+                        '  예) 일당 20만 원 → 5만 원 × 2.97% ≈ 1,485원\n\n'
+                        '• 직접 입력 — 세율을 직접 정할 수 있어요.',
                   ),
                   const SizedBox(height: 2),
                   _OwnerSettingRow(
@@ -781,6 +868,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                     label: '보험',
                     value: _insLabel(_ins),
                     onTap: _openPolicy,
+                    helpTitle: '4대보험이란?',
+                    helpBody: '국가에서 운영하는 사회보험이에요. 일부 금액을 급여에서 공제해요.\n\n'
+                        '• 없음 — 보험료를 공제하지 않아요.\n\n'
+                        '• 고용보험만 (0.9%) — 급여의 0.9%를 공제해요. 나중에 직장을 잃으면 실업급여를 받을 수 있어요.\n\n'
+                        '• 4대보험 전체 (~9.4%) — 국민연금 4.5% + 건강보험 3.545% + 고용보험 0.9% + 장기요양 0.45% = 약 9.4%를 공제해요.\n\n'
+                        '※ 2026년 근로자 부담분 기준이에요.',
                   ),
                   const SizedBox(height: 2),
                   _OwnerSettingRow(
@@ -788,6 +881,9 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                     label: '야간 · 연장 · 휴일',
                     value: _surchargeLabel(_surcharge),
                     onTap: _openPolicy,
+                    helpTitle: '추가 수당이란?',
+                    helpBody: '기본 시급 외에 법이나 약속으로 추가로 받는 돈이에요.\n\n'
+                        '아래 각 항목의 ? 버튼을 누르면 계산 방법을 자세히 볼 수 있어요.',
                   ),
                   const SizedBox(height: 8),
                   const Divider(height: 1, color: Color(0xFFF0F0F5)),
@@ -802,6 +898,14 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                       _surcharge =
                           _surcharge.copyWith(weeklyHolidayEnabled: v);
                     }),
+                    helpTitle: '주휴수당이란?',
+                    helpBody: '주 15시간 이상 일하면 쉬는 날에도 하루치 급여를 추가로 받는 제도예요.\n\n'
+                        '계산법\n'
+                        '(주 근무시간 ÷ 40시간) × 8시간 × 시급\n'
+                        '(최대 8시간까지만 인정해요)\n\n'
+                        '예) 주 20시간 근무, 시급 10,000원\n'
+                        '→ (20 ÷ 40) × 8시간 × 10,000원 = 40,000원 추가\n\n'
+                        '※ 주 15시간 미만이면 주휴수당이 없어요.',
                   ),
                   const SizedBox(height: 6),
                   _OwnerToggleRow(
@@ -820,6 +924,12 @@ class _OwnerStoreFormScreenState extends State<OwnerStoreFormScreen> {
                             : _surcharge.overtimeRule,
                       );
                     }),
+                    helpTitle: '연장수당 (주 40시간 초과)란?',
+                    helpBody: '일요일~토요일 한 주 동안 총 40시간을 넘게 일하면 초과분에 추가 수당을 받아요.\n\n'
+                        '계산법\n'
+                        '(주 총 근무시간 - 40시간) × 시급 × 설정 비율%\n\n'
+                        '예) 주 45시간 근무, 시급 10,000원, 50% 설정\n'
+                        '→ 초과 5시간 × 10,000원 × 50% = 25,000원 추가',
                   ),
                 ],
               ),
@@ -925,6 +1035,8 @@ class _OwnerToggleRow extends StatelessWidget {
     required this.value,
     required this.accent,
     required this.onChanged,
+    this.helpTitle,
+    this.helpBody,
   });
 
   final IconData icon;
@@ -933,6 +1045,8 @@ class _OwnerToggleRow extends StatelessWidget {
   final bool value;
   final Color accent;
   final ValueChanged<bool> onChanged;
+  final String? helpTitle;
+  final String? helpBody;
 
   @override
   Widget build(BuildContext context) {
@@ -971,6 +1085,10 @@ class _OwnerToggleRow extends StatelessWidget {
               ],
             ),
           ),
+          if (helpTitle != null) ...[
+            helpIcon(context, title: helpTitle!, body: helpBody!),
+            const SizedBox(width: 4),
+          ],
           Switch(
             value: value,
             onChanged: onChanged,

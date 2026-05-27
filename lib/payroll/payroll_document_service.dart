@@ -49,9 +49,11 @@ class PayrollDocumentService {
         payRule: PayDateRule.nextMonthlyDay(effectivePayDay),
       );
 
-      // period에 겹치는 스케줄만 필터
+      // period에 겹치는 스케줄만 필터 (표시/집계용)
       final filtered = _filterSchedulesByPeriod(ws, period);
       final uiSchedules = filtered.map(_toUiSchedule).toList(growable: false);
+      // 주휴수당 경계 주 계산용: 해당 작업자의 전체 스케줄
+      final allUiSchedules = ws.map(_toUiSchedule).toList(growable: false);
 
       final alba = UICalendarAlba(
         id: w.workerUid,
@@ -76,7 +78,7 @@ class PayrollDocumentService {
       final summary = _engine.summaryForDate(
         policy: policy,
         alba: alba,
-        schedules: uiSchedules,
+        schedules: allUiSchedules,
         tax: tax,
         insurance: insurance,
         surchargePolicy: surcharge,
@@ -89,9 +91,6 @@ class PayrollDocumentService {
 
       final workedMinutes = _sumWorkedMinutesLikeEngine(filtered);
 
-      final effectivePeriodTax = taxAtFn(summary.period.start);
-      final effectivePeriodIns = insuranceAtFn(summary.period.start);
-
       rows.add(
         PayrollDocumentRow(
           kind: PayrollDocumentKind.period,
@@ -102,14 +101,15 @@ class PayrollDocumentService {
           periodStart: summary.period.start,
           periodEnd: summary.period.end,
           payDate: summary.payDate,
-          hourlyWage: wageAtFn(w.workerUid, summary.period.start),
+          hourlyWage: wageAtFn(w.workerUid, summary.period.end),
           workedMinutes: workedMinutes,
           scheduleCount: filtered.length,
           gross: summary.gross,
           net: summary.net,
-          tax: effectivePeriodTax,
-          insurance: effectivePeriodIns,
-          surcharge: surcharge,
+          weeklyHolidayPay: summary.weeklyHolidayPay,
+          tax: taxAtFn(summary.period.end),
+          insurance: insuranceAtFn(summary.period.end),
+          surcharge: surchargeAtFn(summary.period.end),
           payrollPolicy: policy,
           changeNotes: _buildChangeNotesForRange(
             worker: w,
@@ -210,6 +210,8 @@ class PayrollDocumentService {
       if (filtered.isEmpty) continue;
 
       final uiSchedules = filtered.map(_toUiSchedule).toList(growable: false);
+      // 주휴수당 경계 주 계산용: 해당 작업자의 전체 스케줄
+      final allUiSchedules = wsAll.map(_toUiSchedule).toList(growable: false);
 
       final alba = UICalendarAlba(
         id: w.workerUid,
@@ -236,6 +238,7 @@ class PayrollDocumentService {
       // 당일급여: 하루 단위 period이므로 각 날짜별 합산
       final int rowGross;
       final int rowNet;
+      int rowWeeklyHolidayPay = 0;
       final DateTime rowPeriodStart;
       final DateTime rowPeriodEnd;
       final DateTime rowPayDate;
@@ -250,7 +253,7 @@ class PayrollDocumentService {
           final ds = _engine.summaryForDate(
             policy: policy,
             alba: alba,
-            schedules: uiSchedules,
+            schedules: allUiSchedules,
             tax: tax,
             insurance: insurance,
             surchargePolicy: surcharge,
@@ -262,6 +265,7 @@ class PayrollDocumentService {
           );
           gSum += ds.gross;
           nSum += ds.net;
+          rowWeeklyHolidayPay += ds.weeklyHolidayPay;
         }
         rowGross = gSum;
         rowNet = nSum;
@@ -273,7 +277,7 @@ class PayrollDocumentService {
         final summary = _engine.summaryForDate(
           policy: policy,
           alba: alba,
-          schedules: uiSchedules,
+          schedules: allUiSchedules,
           tax: tax,
           insurance: insurance,
           surchargePolicy: surcharge,
@@ -285,6 +289,7 @@ class PayrollDocumentService {
         );
         rowGross = summary.gross;
         rowNet = summary.net;
+        rowWeeklyHolidayPay = summary.weeklyHolidayPay;
         rowPeriodStart = summary.period.start;
         rowPeriodEnd = summary.period.end;
         rowPayDate = summary.payDate;
@@ -300,14 +305,15 @@ class PayrollDocumentService {
           periodStart: rowPeriodStart,
           periodEnd: rowPeriodEnd,
           payDate: rowPayDate,
-          hourlyWage: wageAtFn(w.workerUid, rowPeriodStart),
+          hourlyWage: wageAtFn(w.workerUid, rowPeriodEnd),
           workedMinutes: workedMinutes,
           scheduleCount: filtered.length,
           gross: rowGross,
           net: rowNet,
-          tax: taxAtFn(rowPeriodStart),
-          insurance: insuranceAtFn(rowPeriodStart),
-          surcharge: surcharge,
+          weeklyHolidayPay: rowWeeklyHolidayPay,
+          tax: taxAtFn(rowPeriodEnd),
+          insurance: insuranceAtFn(rowPeriodEnd),
+          surcharge: surchargeAtFn(rowPeriodEnd),
           payrollPolicy: policy,
           changeNotes: _buildChangeNotesForRange(
             worker: w,
@@ -502,6 +508,7 @@ class PayrollDocumentService {
   }
 
   TaxConfig _effectiveTax({required Store store, required StoreWorker worker}) {
+    if (worker.inheritFromStore) return store.taxConfig;
     final base = store.taxConfig;
 
     final o = worker.policyOverride;
@@ -517,6 +524,7 @@ class PayrollDocumentService {
     required Store store,
     required StoreWorker worker,
   }) {
+    if (worker.inheritFromStore) return store.insuranceConfig;
     final base = store.insuranceConfig;
 
     final o = worker.policyOverride;
@@ -644,7 +652,13 @@ class PayrollDocumentService {
     _appendInsuranceChange(changes, previous, current);
 
     if (changes.isEmpty) return null;
-    return '$workerName ${PayrollDocumentRow.fmtDate(effectiveFrom)} ${changes.join(', ')}';
+
+    final recordedAtRaw = current['recordedAt'];
+    final dateLabel = recordedAtRaw is String && recordedAtRaw.isNotEmpty
+        ? '수정일: $recordedAtRaw / 적용일: ${PayrollDocumentRow.fmtDate(effectiveFrom)}'
+        : '적용일: ${PayrollDocumentRow.fmtDate(effectiveFrom)}';
+
+    return '$workerName  $dateLabel  ${changes.join(', ')}';
   }
 
   void _appendWageChange(
@@ -855,6 +869,7 @@ class PayrollDocumentRow {
 
   final int gross;
   final int net;
+  final int weeklyHolidayPay;
 
   final TaxConfig tax;
   final InsuranceConfig insurance;
@@ -876,6 +891,7 @@ class PayrollDocumentRow {
     required this.scheduleCount,
     required this.gross,
     required this.net,
+    this.weeklyHolidayPay = 0,
     required this.tax,
     required this.insurance,
     required this.surcharge,

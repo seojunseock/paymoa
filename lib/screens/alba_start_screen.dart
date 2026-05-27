@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../common/app_words.dart';
+import '../common/korean_holidays.dart';
 import '../common/paymoa_design.dart';
 import '../models/ui_calendar_models.dart';
 import '../common/common_pickers.dart' as cp;
@@ -139,12 +140,14 @@ class _DayCell extends StatelessWidget {
     required this.selected,
     required this.isToday,
     this.weekday,
+    this.isHoliday = false,
   });
 
   final String text;
   final bool selected;
   final bool isToday;
   final int? weekday; // DateTime.monday(1) ~ DateTime.sunday(7)
+  final bool isHoliday;
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +164,7 @@ class _DayCell extends StatelessWidget {
         ? Colors.white
         : isToday
             ? PaymoaColors.primary
-            : isSun
+            : (isSun || isHoliday)
                 ? const Color(0xFFE53935)
                 : isSat
                     ? const Color(0xFF1E88E5)
@@ -1245,11 +1248,10 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
             (payroll.monthlyStartDay ?? 1) == 1);
 
     if (isCalendarMonth) {
-      final monthSchedules = widget.schedules
-          .where((s) =>
-              s.albaId == alba.id &&
-              s.year == ymDate.year &&
-              s.month == ymDate.month)
+      final allAlbaSchedules =
+          widget.schedules.where((s) => s.albaId == alba.id).toList();
+      final monthSchedules = allAlbaSchedules
+          .where((s) => s.year == ymDate.year && s.month == ymDate.month)
           .toList();
       if (monthSchedules.isEmpty) return 0;
       final surchargeAt = _surchargeAtOf(alba.id);
@@ -1258,6 +1260,7 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
         alba: alba,
         ymDate: ymDate,
         schedules: monthSchedules,
+        allSchedules: allAlbaSchedules,
         tax: _taxAtOf(alba.id)?.call(monthStart) ?? _taxOf(alba.id),
         insurance: _insAtOf(alba.id)?.call(monthStart) ?? _insOf(alba.id),
         policy: sur,
@@ -1890,18 +1893,24 @@ class _WeeklyCalendarBox extends StatelessWidget {
             selected: false,
             isToday: false,
             weekday: day.weekday,
+            isHoliday: day.weekday != DateTime.sunday &&
+                KoreanHolidays.isHoliday(day),
           ),
           todayBuilder: (ctx, day, _) => _DayCell(
             text: '${day.day}',
             selected: false,
             isToday: true,
             weekday: day.weekday,
+            isHoliday: day.weekday != DateTime.sunday &&
+                KoreanHolidays.isHoliday(day),
           ),
           selectedBuilder: (ctx, day, _) => _DayCell(
             text: '${day.day}',
             selected: true,
             isToday: false,
             weekday: day.weekday,
+            isHoliday: day.weekday != DateTime.sunday &&
+                KoreanHolidays.isHoliday(day),
           ),
           markerBuilder: (context, day, events) {
             final dots = events.whereType<_DotEvent>().toList();
