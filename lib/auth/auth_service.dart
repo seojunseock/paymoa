@@ -140,6 +140,18 @@ class AuthService {
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 게스트(익명) 로그인
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Future<User?> signInAnonymously() async {
+    try {
+      final cred = await FirebaseAuth.instance.signInAnonymously();
+      return cred.user;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // 로그아웃
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Future<void> signOut() async {

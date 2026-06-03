@@ -37,6 +37,9 @@ class _LoginScreenState extends State<LoginScreen> {
         case 'apple':
           await AuthService.instance.signInWithApple();
           break;
+        case 'guest':
+          await AuthService.instance.signInAnonymously();
+          break;
       }
     } catch (e) {
       if (!mounted) return;
@@ -156,6 +159,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         const Spacer(),
+                        _GuestLoginButton(
+                          loading: _loading && _loadingProvider == 'guest',
+                          onTap: () => _login('guest'),
+                        ),
+                        const SizedBox(height: 14),
                         if (isIOS) ...[
                           _AppleLoginButton(
                             loading: _loading && _loadingProvider == 'apple',
@@ -447,6 +455,79 @@ class _AppleLoginButton extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// 게스트 버튼
+class _GuestLoginButton extends StatelessWidget {
+  const _GuestLoginButton({
+    required this.loading,
+    required this.onTap,
+  });
+
+  final bool loading;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return Container(
+        width: double.infinity,
+        height: 56,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F0FF),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation(Color(0xFF7C3AED)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: const Color(0xFFF3F0FF),
+          side: const BorderSide(color: Color(0xFFD8B4FE), width: 1),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.person_outline_rounded,
+              size: 18,
+              color: Color(0xFF7C3AED),
+            ),
+            const SizedBox(width: 24),
+            const Expanded(
+              child: Text(
+                '게스트로 참여하기',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF7C3AED),
+                ),
+              ),
+            ),
+            const SizedBox(width: 18),
+          ],
         ),
       ),
     );

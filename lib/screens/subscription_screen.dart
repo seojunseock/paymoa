@@ -11,7 +11,6 @@ import '../services/promo_service.dart';
 const kSubscriptionEnabled = true;
 
 /// false 시 구독 UI 전체 숨김
-/// ✅ TODO: RevenueCat iOS 키 설정 완료 후 true 로 변경
 const kSubscriptionVisible = false;
 
 // ─────────────────────────────────────────
