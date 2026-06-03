@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.7</string>
+	<string>1.0.8</string>
 	<key>CFBundleVersion</key>
-	<string>87</string>
+	<string>88</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -54,7 +54,7 @@
 
 	<!-- AdMob App ID -->
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-2756061286403249~6232431116</string>
+	<string>ca-app-pub-2756061286403249~6415173601</string>
 
 	<!-- AdMob: iOS 14+ 사용자 추적 동의 (필수) -->
 	<key>NSUserTrackingUsageDescription</key>
