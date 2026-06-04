@@ -7,6 +7,7 @@ import '../policies/policy_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
 
 import '../navigation/app_nav.dart';
@@ -1280,6 +1281,7 @@ class _AppShellState extends State<AppShell> {
         'myAlbas',
         'storeJoins',
         'schedules',
+        'mySchedules',
         'personalAlbaPolicies',
         'policies',
       ]) {
@@ -1289,6 +1291,9 @@ class _AppShellState extends State<AppShell> {
       await db.collection('users').doc(uid).delete();
     } catch (_) {}
 
+    try {
+      await GoogleSignIn().disconnect();
+    } catch (_) {}
     try {
       await UserApi.instance.unlink();
     } catch (_) {}

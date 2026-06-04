@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' hide User;
 
 import '../auth/auth_service.dart';
@@ -179,13 +180,27 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
       final storesSnap =
           await db.collection('users').doc(uid).collection('stores').get();
       for (final storeDoc in storesSnap.docs) {
+        // 매장 입장 코드 삭제 (storeJoinCodes 글로벌 컬렉션)
+        final storeData = storeDoc.data() as Map<String, dynamic>?;
+        final code = storeData?['code'] as String?;
+        if (code != null && code.isNotEmpty) {
+          try {
+            await db.collection('storeJoinCodes').doc(code).delete();
+          } catch (_) {}
+        }
         for (final sub in ['workers', 'schedules']) {
           await _deleteCollection(storeDoc.reference.collection(sub));
         }
         await storeDoc.reference.delete();
       }
 
-      for (final sub in ['myAlbas', 'storeJoins', 'schedules', 'policies']) {
+      for (final sub in [
+        'myAlbas',
+        'storeJoins',
+        'schedules',
+        'mySchedules',
+        'policies',
+      ]) {
         await _deleteCollection(
           db.collection('users').doc(uid).collection(sub),
         );
@@ -193,6 +208,9 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
       await db.collection('users').doc(uid).delete();
     } catch (_) {}
 
+    try {
+      await GoogleSignIn().disconnect();
+    } catch (_) {}
     try {
       await UserApi.instance.unlink();
     } catch (_) {}
