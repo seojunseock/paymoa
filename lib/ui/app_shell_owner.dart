@@ -122,6 +122,11 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
 
   Future<void> _logout() async {
     SubscriptionService.instance.clearSession();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.isAnonymous) {
+      await _doDeleteAccount(user);
+      return;
+    }
     try {
       await AuthService.instance.signOut();
     } catch (e) {
@@ -161,6 +166,10 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    await _doDeleteAccount(user);
+  }
+
+  Future<void> _doDeleteAccount(User user) async {
     final uid = user.uid;
     final db = FirebaseFirestore.instance;
     final roleRepo = RoleRepository();

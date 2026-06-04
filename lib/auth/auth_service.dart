@@ -155,10 +155,13 @@ class AuthService {
   // 로그아웃
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Future<void> signOut() async {
-    await GoogleSignIn().signOut();
-    try {
-      await UserApi.instance.logout();
-    } catch (_) {}
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      await GoogleSignIn().signOut();
+      try {
+        await UserApi.instance.logout();
+      } catch (_) {}
+    }
     await FirebaseAuth.instance.signOut();
   }
 

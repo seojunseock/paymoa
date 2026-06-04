@@ -1257,6 +1257,12 @@ class _AppShellState extends State<AppShell> {
 
     if (mounted) setState(() => _tab = 0);
 
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.isAnonymous) {
+      await _deleteAccount();
+      return;
+    }
+
     await AuthService.instance.signOut();
   }
 
