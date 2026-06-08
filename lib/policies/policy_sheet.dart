@@ -102,15 +102,16 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
     _dailyOverOn = isDailyOver;
     _weeklyOverOn = isWeeklyOver;
 
+    // 법정 최저 50% 보정: 기존 저장값이 50 미만이면 50으로 올려서 표시
     _dailyOverPctCtl = TextEditingController(
-        text: _trimPct(isDailyOver ? (s?.overtimePercent ?? 50) : 50));
+        text: _trimPct(_legalMin(isDailyOver ? (s?.overtimePercent ?? 50) : 50)));
     _weeklyOverPctCtl = TextEditingController(
-        text: _trimPct(isWeeklyOver ? (s?.overtimePercent ?? 50) : 50));
+        text: _trimPct(_legalMin(isWeeklyOver ? (s?.overtimePercent ?? 50) : 50)));
 
     _holOn = s?.holidayEnabled ?? false;
-    _holPctCtl = TextEditingController(text: _trimPct(s?.holidayPercent ?? 50));
+    _holPctCtl = TextEditingController(text: _trimPct(_legalMin(s?.holidayPercent ?? 50)));
     _nightOn = s?.nightEnabled ?? false;
-    _nightPctCtl = TextEditingController(text: _trimPct(s?.nightPercent ?? 50));
+    _nightPctCtl = TextEditingController(text: _trimPct(_legalMin(s?.nightPercent ?? 50)));
   }
 
   @override
@@ -137,9 +138,10 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
     final overRule = _weeklyOverOn
         ? pol.OvertimeRule.weeklyOver40
         : pol.OvertimeRule.dailyOver8;
-    final overPct = _weeklyOverOn
+    // 법정 최저 50% 강제 적용 후 저장
+    final overPct = _legalMin(_weeklyOverOn
         ? (int.tryParse(_digitsOnly(_weeklyOverPctCtl.text)) ?? 50)
-        : (int.tryParse(_digitsOnly(_dailyOverPctCtl.text)) ?? 50);
+        : (int.tryParse(_digitsOnly(_dailyOverPctCtl.text)) ?? 50));
 
     return pol.SurchargePolicy(
       weeklyHolidayEnabled: _weeklyHolidayOn,
@@ -150,11 +152,11 @@ class _PolicySheetBodyState extends State<_PolicySheetBody> {
       overtimePercent: overEnabled ? overPct : 0,
       overtimeRule: overRule,
       holidayEnabled: _holOn,
-      holidayPercent: int.tryParse(_digitsOnly(_holPctCtl.text)) ?? 50,
+      holidayPercent: _legalMin(int.tryParse(_digitsOnly(_holPctCtl.text)) ?? 50),
       holidayUseKoreanLawTier: true, // 근로기준법 제56조: 8h 이내 설정%, 초과 최소 100%
       extraHolidayYmds: base.extraHolidayYmds,
       nightEnabled: _nightOn,
-      nightPercent: int.tryParse(_digitsOnly(_nightPctCtl.text)) ?? 50,
+      nightPercent: _legalMin(int.tryParse(_digitsOnly(_nightPctCtl.text)) ?? 50),
     );
   }
 
@@ -820,6 +822,9 @@ void _showHelpDialog(BuildContext context,
 }
 
 String _digitsOnly(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');
+
+/// 법정 최저 가산율 50% 보정 (근로기준법 제56조)
+int _legalMin(int v) => v < 50 ? 50 : v;
 
 String _trimPct(num v) {
   if (v is int) return v.toString();

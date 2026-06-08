@@ -115,7 +115,7 @@ class SurchargePolicy {
     // holiday
     this.holidayEnabled = false,
     this.holidayPercent = 0,
-    this.holidayUseKoreanLawTier = false,
+    this.holidayUseKoreanLawTier = true,
     this.extraHolidayYmds = const <String>[],
 
     // night
