@@ -3,6 +3,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
 import '../ads/ad_service.dart';
+import 'subscription_screen.dart';
+import '../subscription/subscription_service.dart';
 import '../common/app_words.dart';
 import '../models/ui_calendar_models.dart';
 import '../models/alba_form_models.dart';
@@ -183,6 +185,59 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
 
   void _dismissKeyboard() {
     FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  Future<DateTime?> _showMonthChoiceDialog({String title = '언제부터 적용할까요?'}) async {
+    final now = DateTime.now();
+    final thisMonth = DateTime(now.year, now.month, 1);
+    final nextMonth = now.month == 12
+        ? DateTime(now.year + 1, 1, 1)
+        : DateTime(now.year, now.month + 1, 1);
+    return showDialog<DateTime>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.pop(ctx, thisMonth),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('이번 달부터', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                    Text('${thisMonth.month}월 1일', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.pop(ctx, nextMonth),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('다음 달부터', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                    Text('${nextMonth.month}월 1일', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소', style: TextStyle(color: Color(0xFF6B7280))),
+          ),
+        ],
+      ),
+    );
   }
 
   bool get _isEdit => widget.editingAlbaId != null;
@@ -581,7 +636,6 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     // ── 변경 감지 (스냅샷 기반) ───────────────────────────────────────────
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
-    DateTime effectiveFrom = todayDate;
 
     final bool wageChanged =
         _isEdit && _initialWage != null && newWage != _initialWage;
@@ -595,25 +649,38 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     // 이 시점부터 _saving = true → 다이얼로그 중 중복 저장 방지
     setState(() => _saving = true);
     try {
-      if (wageChanged || surchargeChanged || taxInsChanged) {
+      DateTime? wageSurchargeFrom; // 시급·가산정책: 달력으로 날짜 선택
+      DateTime? taxInsFrom;        // 세금·보험: 이번달/다음달 선택
+
+      if (wageChanged || surchargeChanged) {
         final picked = await cp.showSingleDatePickerDialog(
           context,
           initialDate: todayDate,
           firstDay: DateTime(2020),
           lastDay: todayDate.add(const Duration(days: 365)),
-          title: '몇 일부터 적용하시겠습니까?',
+          title: '시급·가산정책 적용일',
         );
         if (!mounted) return;
         if (picked == null) return;
-        effectiveFrom = DateTime(picked.year, picked.month, picked.day);
+        wageSurchargeFrom = DateTime(picked.year, picked.month, picked.day);
+      }
 
-        final dateLabel = '${effectiveFrom.month}/${effectiveFrom.day}';
+      if (taxInsChanged) {
+        final picked = await _showMonthChoiceDialog(title: '세금·보험 적용 시작');
+        if (!mounted) return;
+        if (picked == null) return;
+        taxInsFrom = picked;
+      }
+
+      if (wageChanged || surchargeChanged || taxInsChanged) {
         final lines = <String>[];
         if (wageChanged || surchargeChanged) {
-          lines.add('시급·가산정책은 $dateLabel부터 적용됩니다.');
+          final d = wageSurchargeFrom!;
+          lines.add('시급·가산정책은 ${d.month}/${d.day}부터 적용됩니다.');
         }
         if (taxInsChanged) {
-          lines.add('세금·보험은 $dateLabel부터 적용됩니다.');
+          final d = taxInsFrom!;
+          lines.add('세금·보험은 ${d.month}월 ${d.day}일부터 적용됩니다.');
         }
         final confirmed = await showDialog<bool>(
           context: context,
@@ -654,9 +721,9 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
       }
 
       // ── 최종 결과 빌드 (모두 스냅샷 기반) ─────────────────────────────
-      final DateTime? wageEffectiveFrom = wageChanged ? effectiveFrom : null;
-      final DateTime? policyEffectiveFrom = taxInsChanged ? effectiveFrom : null;
-      final DateTime? surchargeEffectiveFrom = surchargeChanged ? effectiveFrom : null;
+      final DateTime? wageEffectiveFrom = wageChanged ? wageSurchargeFrom : null;
+      final DateTime? policyEffectiveFrom = taxInsChanged ? taxInsFrom : null;
+      final DateTime? surchargeEffectiveFrom = surchargeChanged ? wageSurchargeFrom : null;
 
       final isNewJoinFinal = !_isEdit && snapStoreId.isNotEmpty;
       final result = AlbaFormResult(
@@ -754,9 +821,16 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          const AdBannerWidget(),
+          Column(
+        children: [
+          ValueListenableBuilder<PlanTier>(
+            valueListenable: SubscriptionService.instance.tierNotifier,
+            builder: (_, tier, __) => tier == PlanTier.free
+                ? const AdBannerWidget()
+                : const SizedBox.shrink(),
+          ),
           Expanded(
             child: GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -1169,6 +1243,32 @@ class _AlbaFormScreenState extends State<AlbaFormScreen> {
     ),
   ],
 ),
+          // 저장 중 오버레이
+          if (_saving)
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFFF8F7FF).withOpacity(0.92),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Color(0xFF7C3AED)),
+                      SizedBox(height: 16),
+                      Text(
+                        '저장 중...',
+                        style: TextStyle(
+                          color: Color(0xFF7C3AED),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

@@ -50,6 +50,8 @@ import '../role/role_repository.dart';
 import '../role/consent_repository.dart';
 import '../ads/ad_service.dart';
 import '../services/update_service.dart';
+import '../screens/subscription_screen.dart';
+import '../subscription/subscription_service.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -964,10 +966,15 @@ class _AppShellState extends State<AppShell> {
                   payrollPolicy: isJoin ? null : res.payrollPolicy,
                   policyHistory: newHist,
                 );
+                // 저장 후 스트림을 강제 갱신 → 시급 등 즉시 반영
+                _cachedUid = null;
               });
             }
 
-            if (context.mounted) Navigator.of(context).pop();
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              setState(() => _tab = 1); // 캘린더 탭에서 바로 확인
+            }
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1771,7 +1778,13 @@ class _AppShellState extends State<AppShell> {
                     bottom: false,
                     child: Column(
                       children: [
-                        const AdBannerWidget(),
+                        ValueListenableBuilder<PlanTier>(
+                          valueListenable:
+                              SubscriptionService.instance.tierNotifier,
+                          builder: (_, tier, __) => tier == PlanTier.free
+                              ? const AdBannerWidget()
+                              : const SizedBox.shrink(),
+                        ),
                         Expanded(child: IndexedStack(index: _tab, children: pages)),
                       ],
                     ),

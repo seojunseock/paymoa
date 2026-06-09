@@ -288,7 +288,7 @@ class _OwnerAppShellState extends State<OwnerAppShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFF8F7FF),
         indicatorColor: _primary.withOpacity(0.10),
         surfaceTintColor: Colors.transparent,
         elevation: 0,

@@ -1367,10 +1367,10 @@ class _AlbaStartScreenState extends State<AlbaStartScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: PaymoaColors.background,
+      backgroundColor: const Color(0xFFF8F7FF),
       appBar: AppBar(
         centerTitle: true,
-        backgroundColor: PaymoaColors.background,
+        backgroundColor: const Color(0xFFF8F7FF),
         elevation: 0,
         automaticallyImplyLeading: false, // ✅ 바텀탭 있으므로 뒤로가기 불필요
         title: const Text(

@@ -11,29 +11,40 @@ import '../services/promo_service.dart';
 const kSubscriptionEnabled = true;
 
 /// false 시 구독 UI 전체 숨김
-const kSubscriptionVisible = false;
+const kSubscriptionVisible = true;
 
 // ─────────────────────────────────────────
 // 플랜 정의
 // ─────────────────────────────────────────
-enum PlanTier { free, pro }
+enum PlanTier { free, basic, pro }
 
 class PlanInfo {
   final PlanTier tier;
   final String name;
   final int maxStores;
-  final int maxWorkers; // 매장당 최대 직원 수
-  final int monthlyPrice;
+  final int maxWorkers;
+  /// iOS App Store 가격 (원)
+  final int monthlyPriceIos;
+  /// Google Play Store 가격 (원)
+  final int monthlyPriceAndroid;
   final String badge;
+  final bool showAds;
 
   const PlanInfo({
     required this.tier,
     required this.name,
     required this.maxStores,
     required this.maxWorkers,
-    required this.monthlyPrice,
+    required this.monthlyPriceIos,
+    required this.monthlyPriceAndroid,
     this.badge = '',
+    this.showAds = false,
   });
+
+  /// 현재 플랫폼에 맞는 가격 반환
+  int get monthlyPrice => Platform.isIOS ? monthlyPriceIos : monthlyPriceAndroid;
+
+  String get workersLabel => '$maxWorkers명';
 }
 
 const kPlans = [
@@ -41,15 +52,28 @@ const kPlans = [
     tier: PlanTier.free,
     name: '무료',
     maxStores: 1,
-    maxWorkers: 5,
-    monthlyPrice: 0,
+    maxWorkers: 8,
+    monthlyPriceIos: 0,
+    monthlyPriceAndroid: 0,
+    showAds: true,
+  ),
+  PlanInfo(
+    tier: PlanTier.basic,
+    name: '베이직',
+    maxStores: 1,
+    maxWorkers: 20,
+    monthlyPriceIos: 2500,     // TODO: 애플 실제 가격으로 교체
+    monthlyPriceAndroid: 2500, // TODO: 플레이스토어 실제 가격으로 교체
+    showAds: false,
   ),
   PlanInfo(
     tier: PlanTier.pro,
     name: '프로',
-    maxStores: 10,
-    maxWorkers: 40,
-    monthlyPrice: 4000,
+    maxStores: 5,
+    maxWorkers: 100,
+    monthlyPriceIos: 9900,     // TODO: 애플 실제 가격으로 교체
+    monthlyPriceAndroid: 9900, // TODO: 플레이스토어 실제 가격으로 교체
+    showAds: false,
     badge: '추천',
   ),
 ];
@@ -88,7 +112,10 @@ class SubscriptionScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: _SubscriptionBody(currentTier: currentTier),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+        child: _SubscriptionBody(currentTier: currentTier),
+      ),
     );
   }
 }
@@ -160,10 +187,12 @@ class SubscriptionSheet extends StatelessWidget {
               ],
             ),
           ),
-          // 본문
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-            child: _SubscriptionBody(currentTier: currentTier),
+          // 본문 (스크롤 가능)
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+              child: _SubscriptionBody(currentTier: currentTier),
+            ),
           ),
         ],
       ),
@@ -183,11 +212,30 @@ class _SubscriptionBody extends StatefulWidget {
 }
 
 class _SubscriptionBodyState extends State<_SubscriptionBody> {
-  bool _loading = false;
+  bool _loadingBasic = false;
+  bool _loadingPro = false;
   String? _errorMsg;
 
-  Future<void> _onSubscribe() async {
-    setState(() { _loading = true; _errorMsg = null; });
+  Future<void> _onSubscribeBasic() async {
+    setState(() { _loadingBasic = true; _errorMsg = null; });
+    try {
+      final success = await SubscriptionService.instance.purchaseBasic();
+      if (!mounted) return;
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('베이직 플랜으로 업그레이드됐어요!')),
+        );
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _errorMsg = '구독 중 오류가 발생했어요. 다시 시도해주세요.');
+    } finally {
+      if (mounted) setState(() => _loadingBasic = false);
+    }
+  }
+
+  Future<void> _onSubscribePro() async {
+    setState(() { _loadingPro = true; _errorMsg = null; });
     try {
       final success = await SubscriptionService.instance.purchasePro(
         discountProductId: PromoService.instance.discountProductId,
@@ -202,7 +250,7 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
     } catch (_) {
       if (mounted) setState(() => _errorMsg = '구독 중 오류가 발생했어요. 다시 시도해주세요.');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _loadingPro = false);
     }
   }
 
@@ -213,7 +261,6 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
       builder: (ctx) => _OwnerPromoDialog(ctrl: ctrl),
     );
     if (!mounted) return;
-    // grant_pro 적용됐으면 시트 닫기
     if (PromoService.instance.isProGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('프로 플랜이 적용됐어요!')),
@@ -224,7 +271,7 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
 
   Future<void> _onRestore() async {
     setState(() {
-      _loading = true;
+      _loadingPro = true;
       _errorMsg = null;
     });
     try {
@@ -236,18 +283,23 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
         );
         Navigator.of(context).pop();
       } else {
-        setState(() => _errorMsg = '복원할 구독 내역이 없어요.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('복원할 구독 내역이 없어요.')),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _errorMsg = '복원 중 오류가 발생했어요. 다시 시도해주세요.');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _loadingPro = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isPro = widget.currentTier == PlanTier.pro;
+    final tier = widget.currentTier;
+    final isPro = tier == PlanTier.pro;
+    final isBasic = tier == PlanTier.basic;
+    final isFree = tier == PlanTier.free;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -256,102 +308,38 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
         const SizedBox(height: 8),
 
         // ── 무료 플랜 카드 ──
+        _PlanCard(plan: kPlans[0], isCurrentPlan: isFree),
+        const SizedBox(height: 10),
+
+        // ── 베이직 플랜 카드 ──
         _PlanCard(
-          plan: kPlans[0],
-          isCurrentPlan: !isPro,
+          plan: kPlans[1],
+          isCurrentPlan: isBasic,
+          onSubscribe: isFree ? _onSubscribeBasic : null,
+          loading: _loadingBasic,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         // ── 프로 플랜 카드 ──
         _PlanCard(
-          plan: kPlans[1],
+          plan: kPlans[2],
           isCurrentPlan: isPro,
+          onSubscribe: !isPro ? _onSubscribePro : null,
+          loading: _loadingPro,
+          promoDiscountPercent: PromoService.instance.hasDiscount
+              ? PromoService.instance.discountPercent?.toDouble()
+              : null,
+          isUpgrade: isBasic,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
 
-        // ── 할인 코드 적용 배지 ──
-        if (PromoService.instance.hasDiscount) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEDE9FE),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Builder(builder: (_) {
-              final pct = PromoService.instance.discountPercent!;
-              final original = kPlans[1].monthlyPrice;
-              final discounted = (original * (1 - pct / 100)).round();
-              return Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.local_offer_rounded,
-                      size: 16, color: Color(0xFF7C3AED)),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$pct% 할인 적용 · ${_comma(discounted)}원/월',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF7C3AED),
-                    ),
-                  ),
-                ],
-              );
-            }),
-          ),
-          const SizedBox(height: 12),
-        ],
-
-        // ── 구독 버튼 ──
-        if (!isPro) ...[
-          SizedBox(
-            height: 52,
-            child: ElevatedButton(
-              onPressed: _loading ? null : _onSubscribe,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF7C3AED),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-              ),
-              child: _loading
-                  ? const SizedBox(
-                      width: 22, height: 22,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Builder(builder: (_) {
-                      final promo = PromoService.instance;
-                      if (promo.hasDiscount) {
-                        final pct = promo.discountPercent!;
-                        final original = kPlans[1].monthlyPrice;
-                        final discounted =
-                            (original * (1 - pct / 100)).round();
-                        return Text(
-                          '프로 구독하기  ${_comma(discounted)}원/월',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700),
-                        );
-                      }
-                      return const Text(
-                        '프로 구독하기  4,000원/월',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700),
-                      );
-                    }),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // ── 복원 / 프로모 코드 버튼 ──
-          // iOS: Apple 정책상 커스텀 프로모 코드 불허 → 프로모션 코드 버튼 숨김
+        // ── 복원 / 프로모 코드 ──
+        if (!isPro)
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TextButton(
-                onPressed: _loading ? null : _onRestore,
+                onPressed: (_loadingBasic || _loadingPro) ? null : _onRestore,
                 child: const Text('구매 내역 복원하기',
                     style: TextStyle(
                         fontSize: 13, color: Color(0xFF6B7280),
@@ -360,7 +348,7 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
               if (!Platform.isIOS) ...[
                 const Text('·', style: TextStyle(color: Color(0xFF6B7280))),
                 TextButton(
-                  onPressed: _loading ? null : _onPromoCode,
+                  onPressed: (_loadingBasic || _loadingPro) ? null : _onPromoCode,
                   child: const Text('프로모션 코드',
                       style: TextStyle(
                           fontSize: 13, color: Color(0xFF6B7280),
@@ -369,7 +357,6 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
               ],
             ],
           ),
-        ],
 
         // ── 에러 메시지 ──
         if (_errorMsg != null) ...[
@@ -377,10 +364,7 @@ class _SubscriptionBodyState extends State<_SubscriptionBody> {
           Text(
             _errorMsg!,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFFEF4444),
-            ),
+            style: const TextStyle(fontSize: 13, color: Color(0xFFEF4444)),
           ),
         ],
 
@@ -397,29 +381,60 @@ class _PlanCard extends StatelessWidget {
   const _PlanCard({
     required this.plan,
     required this.isCurrentPlan,
+    this.onSubscribe,
+    this.loading = false,
+    this.promoDiscountPercent,
+    this.isUpgrade = false,
   });
 
   final PlanInfo plan;
   final bool isCurrentPlan;
+  final VoidCallback? onSubscribe;
+  final bool loading;
+  final double? promoDiscountPercent;
+  final bool isUpgrade;
 
   @override
   Widget build(BuildContext context) {
-    final isPro = plan.tier == PlanTier.pro;
-    final borderColor =
-        isPro ? const Color(0xFF7C3AED) : const Color(0xFFE5E7EB);
-    final bgColor =
-        isPro ? const Color(0xFFF5F3FF) : Colors.white;
+    final borderColor = isCurrentPlan
+        ? const Color(0xFF7C3AED)
+        : const Color(0xFFE5E7EB);
+    final bgColor = isCurrentPlan
+        ? const Color(0xFFF5F3FF)
+        : Colors.white;
+    final nameColor = isCurrentPlan
+        ? const Color(0xFF7C3AED)
+        : const Color(0xFF111827);
+
+    // 버튼 라벨 계산
+    String? btnLabel;
+    if (onSubscribe != null) {
+      if (plan.tier == PlanTier.basic) {
+        btnLabel = '베이직 구독하기  ${_comma(plan.monthlyPrice)}원/월';
+      } else {
+        final label = isUpgrade ? '프로로 업그레이드' : '프로 구독하기';
+        if (promoDiscountPercent != null) {
+          final discounted =
+              (plan.monthlyPrice * (1 - promoDiscountPercent! / 100)).round();
+          btnLabel = '$label  ${_comma(discounted)}원/월';
+        } else {
+          btnLabel = '$label  ${_comma(plan.monthlyPrice)}원/월';
+        }
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor, width: isPro ? 2 : 1),
+        border: Border.all(
+            color: borderColor, width: isCurrentPlan ? 2.0 : 1.0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── 헤더 행 ──
           Row(
             children: [
               Text(
@@ -427,9 +442,7 @@ class _PlanCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: isPro
-                      ? const Color(0xFF7C3AED)
-                      : const Color(0xFF111827),
+                  color: nameColor,
                 ),
               ),
               if (plan.badge.isNotEmpty) ...[
@@ -472,14 +485,17 @@ class _PlanCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          _FeatureRow(
-            icon: Icons.store_outlined,
-            label: '매장 ${plan.maxStores}개',
-          ),
+          // ── 기능 목록 ──
+          _FeatureRow(icon: Icons.store_outlined, label: '매장 ${plan.maxStores}개'),
+          const SizedBox(height: 6),
+          _FeatureRow(icon: Icons.people_outline, label: '알바생 ${plan.workersLabel}'),
           const SizedBox(height: 6),
           _FeatureRow(
-            icon: Icons.people_outline,
-            label: '매장당 직원 ${plan.maxWorkers}명',
+            icon: plan.showAds ? Icons.campaign_outlined : Icons.block_outlined,
+            label: plan.showAds ? '광고 있음' : '광고 없음',
+            color: plan.showAds
+                ? const Color(0xFF9CA3AF)
+                : const Color(0xFF059669),
           ),
           if (plan.monthlyPrice > 0) ...[
             const SizedBox(height: 12),
@@ -492,6 +508,36 @@ class _PlanCard extends StatelessWidget {
               ),
             ),
           ],
+          // ── 구독 버튼 (카드 안) ──
+          if (btnLabel != null) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                onPressed: loading ? null : onSubscribe,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                child: loading
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        btnLabel,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -499,21 +545,26 @@ class _PlanCard extends StatelessWidget {
 }
 
 class _FeatureRow extends StatelessWidget {
-  const _FeatureRow({required this.icon, required this.label});
+  const _FeatureRow({
+    required this.icon,
+    required this.label,
+    this.color = const Color(0xFF6B7280),
+  });
   final IconData icon;
   final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: const Color(0xFF6B7280)),
+        Icon(icon, size: 16, color: color),
         const SizedBox(width: 6),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: Color(0xFF374151),
+            color: color,
           ),
         ),
       ],
@@ -554,6 +605,7 @@ class _OwnerPromoDialogState extends State<_OwnerPromoDialog> {
     final result = await PromoService.instance.applyCode(code);
     if (!mounted) return;
 
+    final proPrice = kPlans.last.monthlyPrice;
     setState(() {
       _loading = false;
       switch (result) {
@@ -563,8 +615,7 @@ class _OwnerPromoDialogState extends State<_OwnerPromoDialog> {
         case PromoResult.discount:
           _success = true;
           final pct = PromoService.instance.discountPercent ?? 0;
-          final original = kPlans[1].monthlyPrice;
-          final discounted = (original * (1 - pct / 100)).round();
+          final discounted = (proPrice * (1 - pct / 100)).round();
           _msg = '$pct% 할인 적용! ${_comma(discounted)}원/월로 구독할 수 있어요.';
         case PromoResult.already:
           _msg = '이미 적용된 코드예요.';

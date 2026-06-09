@@ -13,10 +13,11 @@ import '../services/promo_service.dart';
 const _rcAndroidKey = 'goog_ALUYwdkPcoDpZBDsoamZJcCKwpQ';
 // ✅ TODO: RevenueCat 대시보드 → iOS 앱 → API Key 복사 후 아래에 입력
 // 키 입력 후 subscription_screen.dart의 kSubscriptionVisible = true 로 변경
-const _rcIosKey     = 'REVENUECAT_IOS_KEY_HERE';
+const _rcIosKey     = 'appa1fc3a5715';
 
 /// RevenueCat Entitlement ID (RevenueCat 대시보드에서 설정한 이름과 동일해야 함)
-const _proEntitlement = 'pro';
+const _proEntitlement   = 'pro';
+const _basicEntitlement = 'basic';
 
 // ─────────────────────────────────────────
 // 구독 상태
@@ -122,10 +123,18 @@ class SubscriptionService {
   }
 
   void _applyCustomerInfo(CustomerInfo info) {
-    final isPro = info.entitlements.active.containsKey(_proEntitlement);
+    final isPro   = info.entitlements.active.containsKey(_proEntitlement);
+    final isBasic = info.entitlements.active.containsKey(_basicEntitlement);
+    final tier = isPro
+        ? PlanTier.pro
+        : isBasic
+            ? PlanTier.basic
+            : PlanTier.free;
     _cached = SubscriptionInfo(
-      status: isPro ? SubscriptionStatus.active : SubscriptionStatus.free,
-      tier: isPro ? PlanTier.pro : PlanTier.free,
+      status: (isPro || isBasic)
+          ? SubscriptionStatus.active
+          : SubscriptionStatus.free,
+      tier: tier,
     );
     tierNotifier.value = _cached!.tier;
   }
@@ -135,6 +144,29 @@ class SubscriptionService {
     if (!kSubscriptionEnabled) return _cached!;
     await _syncFromRevenueCat();
     return _cached!;
+  }
+
+  // ── 베이직 구독 구매 ──
+  Future<bool> purchaseBasic() async {
+    try {
+      final offerings = await Purchases.getOfferings();
+      final current = offerings.current;
+      if (current == null || current.availablePackages.isEmpty) return false;
+
+      final package = current.availablePackages.firstWhere(
+        (p) => p.storeProduct.identifier.contains('basic'),
+        orElse: () => current.availablePackages.first,
+      );
+
+      final info = await Purchases.purchasePackage(package);
+      _applyCustomerInfo(info);
+      return _cached?.tier == PlanTier.basic;
+    } on PurchasesError catch (e) {
+      if (e.code == PurchasesErrorCode.purchaseCancelledError) return false;
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── 프로 구독 구매 (할인 코드 적용 시 discountProductId 전달) ──
@@ -171,7 +203,7 @@ class SubscriptionService {
     try {
       final info = await Purchases.restorePurchases();
       _applyCustomerInfo(info);
-      return _cached?.tier == PlanTier.pro;
+      return _cached?.tier != PlanTier.free;
     } catch (_) {
       return false;
     }
@@ -191,7 +223,9 @@ class SubscriptionService {
           .doc(uid)
           .get();
       final tierStr = doc.data()?['subscriptionTier'] as String? ?? 'free';
-      return tierStr == 'pro' ? PlanTier.pro : PlanTier.free;
+      if (tierStr == 'pro') return PlanTier.pro;
+      if (tierStr == 'basic') return PlanTier.basic;
+      return PlanTier.free;
     } catch (_) {
       return PlanTier.free;
     }

@@ -389,6 +389,7 @@ class FirebaseService {
           if (policy != null) ...policy,
           if (defaultHourlyWage != null) 'hourlyWage': defaultHourlyWage,
           'effectiveFrom': effectiveDateStr,
+          'recordedAt': _ymdStr(DateTime.now()),
         },
       );
 
@@ -594,6 +595,7 @@ class FirebaseService {
                     'hourlyWage': defaultHourlyWage,
                   if (previousWage != null) 'previousHourlyWage': previousWage,
                   'effectiveFrom': effectiveDateStr,
+                  'recordedAt': _ymdStr(DateTime.now()),
                 },
               );
 
@@ -825,6 +827,7 @@ class FirebaseService {
       if (policyOverride != null) ...policyOverride,
       if (hourlyWage != null) 'hourlyWage': hourlyWage,
       'effectiveFrom': policyOverride != null ? policyDateStr : wageDateStr,
+      'recordedAt': _ymdStr(DateTime.now()),
     };
 
     // ✅ 가산정책 전용 날짜가 따로 있으면 surcharge-only 엔트리 추가 생성
@@ -843,6 +846,7 @@ class FirebaseService {
         surchargeOnlyEntry = {
           'surcharge': policyOverride['surcharge'],
           'effectiveFrom': surchargeDateStr,
+          'recordedAt': _ymdStr(DateTime.now()),
         };
       }
     }
@@ -1895,19 +1899,20 @@ class FirebaseService {
         final schedules =
             latestSchedulesByStore[storeId] ?? const <StoreSchedule>[];
 
-        // 시급 캐시: workerUid → 유효 시급
-        final wageCache = <String, int>{};
-        for (final w in workers) {
-          final storeWage = store.defaultHourlyWage;
-          wageCache[w.workerUid] = w.inheritFromStore
-              ? (storeWage ?? w.hourlyWage ?? 0)
-              : (w.hourlyWage ?? storeWage ?? 0);
-        }
+        // workerUid → StoreWorker 맵 (날짜 기반 시급 조회용)
+        final workerMap = <String, StoreWorker>{
+          for (final w in workers) w.workerUid: w,
+        };
 
         for (final s in schedules) {
           final key = '${s.year}-${s.month}';
           if (!totals.containsKey(key)) continue;
-          final wage = s.overrideHourlyWage ?? (wageCache[s.workerUid] ?? 0);
+          final scheduleDate = DateTime(s.year, s.month, s.day);
+          final worker = workerMap[s.workerUid];
+          final wage = s.overrideHourlyWage ??
+              (worker != null
+                  ? worker.effectiveHourlyWageAt(store, scheduleDate)
+                  : 0);
           if (wage <= 0) continue;
           final start =
               DateTime(s.year, s.month, s.day, s.startHour, s.startMinute);
@@ -2268,6 +2273,7 @@ class FirebaseService {
       if (policy != null) ...policy,
       'hourlyWage': hourlyWage,
       'effectiveFrom': policy != null ? policyDateStr : wageDateStr,
+      'recordedAt': _ymdStr(DateTime.now()),
     };
 
     final histEntries = _buildHistoryEntries(
@@ -2293,6 +2299,7 @@ class FirebaseService {
           final surchargeOnlyEntry = <String, dynamic>{
             ...policy,
             'effectiveFrom': surchargeDateStr,
+            'recordedAt': _ymdStr(DateTime.now()),
           };
           allEntries = _mergeHistoryEntriesByEffectiveFrom(
               [...histEntries, surchargeOnlyEntry]);
