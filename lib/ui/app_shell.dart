@@ -1792,7 +1792,7 @@ class _AppShellState extends State<AppShell> {
                   bottomNavigationBar: NavigationBar(
                     selectedIndex: _tab,
                     onDestinationSelected: (i) => setState(() => _tab = i),
-                    backgroundColor: Colors.white,
+                    backgroundColor: const Color(0xFFF8F7FF),
                     indicatorColor: const Color(0xFF7C3AED).withOpacity(0.10),
                     surfaceTintColor: Colors.transparent,
                     elevation: 0,

@@ -13,7 +13,7 @@ import '../services/promo_service.dart';
 const _rcAndroidKey = 'goog_ALUYwdkPcoDpZBDsoamZJcCKwpQ';
 // ✅ TODO: RevenueCat 대시보드 → iOS 앱 → API Key 복사 후 아래에 입력
 // 키 입력 후 subscription_screen.dart의 kSubscriptionVisible = true 로 변경
-const _rcIosKey     = 'appa1fc3a5715';
+const _rcIosKey     = 'appl_jMjMetDULrfcVZutaOUSIAQeAWa';
 
 /// RevenueCat Entitlement ID (RevenueCat 대시보드에서 설정한 이름과 동일해야 함)
 const _proEntitlement   = 'pro';
